@@ -1,0 +1,3435 @@
+1-Encendido LED
+
+
+;====================================================================
+; main.asm del proyecto 1 - encendido LED
+;
+; Created:   Sat Feb 21 2026
+; Processor: PIC16F887
+; Compiler:  MPASM (Proteus)
+; Author: LARDET, Juan Pedro
+;====================================================================
+
+#include p16f887.inc                ; Include register definition file
+
+      ;como no se escribe nada aquí por el momento, estamos determinando
+      ;el funcionamiento por defecto del PIC.
+
+      ORG 0x00
+      
+INICIO 
+      BSF STATUS, RP0
+      BCF STATUS, RP1
+      
+      CLRF TRISD
+      
+      BCF STATUS, RP0
+      BCF STATUS, RP1
+      
+      MOVLW B'00000001'
+      MOVWF PORTD
+      
+BUCLE 
+      GOTO BUCLE
+      END
+
+
+
+2-Encendido y apagado LED con pulsador
+
+
+;====================================================================
+; main.asm del proyecto 2 - Encendido y pagado LED con pulsador
+;
+; Created:   Sat Feb 21 2026
+; Processor: PIC16F887
+; Compiler:  MPASM (Proteus)
+; Author: LARDET, Juan Pedro
+;====================================================================
+
+#include p16f887.inc                ; Include register definition file
+
+      ;como no se escribe nada aquí por el momento, estamos determinando
+      ;el funcionamiento por defecto del PIC.
+
+      ORG 0x00
+      
+CONFIGURACIONES 
+      BSF 	STATUS, RP0
+      BCF	STATUS, RP1
+      
+      CLRF 	TRISD
+      MOVLW 	0xFF
+      MOVWF 	TRISC
+      
+      BCF 	STATUS, RP0
+      BCF 	STATUS, RP1
+      
+      MOVLW 	B'00000000'
+      MOVWF 	PORTD
+      
+BUCLE 
+      BTFSS 	PORTC, 0
+      GOTO	APAGAR
+      GOTO	ENCENDER
+APAGAR
+      BCF	PORTD, 0
+      GOTO 	BUCLE
+ENCENDER
+      BSF 	PORTD, 0
+      GOTO	BUCLE
+     
+     
+      END
+
+
+3-Encendido y apagado LED con bucle de tiempo
+
+
+;====================================================================
+; main.asm del proyecto 3 - Encendido y aoagado LED con bucle de tiempo
+;
+; Created:   Sat Feb 21 2026
+; Processor: PIC16F887
+; Compiler:  MPASM (Proteus)
+; Author: LARDET, Juan Pedro
+;====================================================================
+
+#include p16f887.inc                ; Include register definition file
+
+      ;como no se escribe nada aquí por el momento, estamos determinando
+      ;el funcionamiento por defecto del PIC.
+
+      ORG 0x00
+      
+;====================================================================
+; Registros de Propósito General
+      T1 EQU 0X20
+      T2 EQU 0X21
+; usarán con un algorítmo de tiempo
+;====================================================================
+      
+INICIO 
+      BSF STATUS, RP0
+      BCF STATUS, RP1
+      
+      CLRF TRISD
+      
+      BCF STATUS, RP0
+      BCF STATUS, RP1
+      
+      MOVLW 0x0F
+      MOVWF PORTD
+      
+BUCLE 
+      SWAPF PORTD, 1
+      CALL TIEMPO
+      
+      GOTO BUCLE
+      
+TIEMPO
+; subrutina de tiempo 1 segundo
+; algoritmo de https://www.golovchenko.org/home/delay_loops
+			;999997 cycles
+
+			;249998 cycles
+	movlw	0x4F
+	movwf	T1
+	movlw	0xC4
+	movwf	T2
+Delay_0
+	decfsz	T1, f
+	goto	$+2
+	decfsz	T2, f
+	goto	Delay_0
+
+			;2 cycles
+	goto	$+1
+	
+	RETURN 
+      END
+
+4-Display de 7 segmentos contador
+
+
+;====================================================================
+; main.asm - Contador con Pulsador y Display 7 Segmentos
+;
+; Created:   Sat Feb 21 2026
+; Processor: PIC16F887
+; Compiler:  MPASM (Proteus)
+; Author:    LARDET, Juan Pedro
+;====================================================================
+
+#include p16f887.inc
+;===================================================================
+; EN CASO DE NO TENER ESTA PARTE, LA MEMORIA SE RESETEARÁ
+; VAMOS A DESACTIVAR EL WDT
+
+; CONFIG1
+      __CONFIG _CONFIG1, _INTOSCIO & _WDT_OFF 
+
+;====================================================================
+; Registros GPR
+      CBLOCK 0x20
+         CONTADOR           ; Valor binario (0-255)
+         DECENA             ; Resultado BCD Decenas
+         UNIDAD             ; Resultado BCD Unidades
+         TEMP_BCD           ; Auxiliar para no destruir CONTADOR
+         ESTADO_P           ; Registro para detectar flancos
+         T1                 ; Registros para retardo
+         T2
+      ENDC
+;====================================================================
+
+      ORG 0x00
+      
+INICIO 
+      BANKSEL   ANSEL
+      CLRF      ANSEL       ; Puertos digitales
+      CLRF      ANSELH
+      
+      BANKSEL   TRISC
+      MOVLW     B'00000001' ; RC0 como entrada para pulsador
+      MOVWF     TRISC
+      CLRF      TRISD       ; Puerto D para BUS display
+      CLRF      TRISE       ; Puerto E para CONTROL DE TRANSISTOR
+      
+      BANKSEL   PORTD
+      CLRF      PORTD
+      CLRF      PORTE
+      CLRF      CONTADOR
+      CLRF      ESTADO_P
+
+BUCLE 
+      CALL      DETECTAR_FLANCO
+      CALL      DIVIDIR_BCD
+      CALL      MOSTRAR_DISPLAYS
+      CALL      MOSTRAR_DISPLAYS
+      CALL      MOSTRAR_DISPLAYS
+      GOTO      BUCLE
+;====================================================================
+; Subrutina: DETECTAR_FLANCO (Algoritmo Híbrido)
+;====================================================================
+DETECTAR_FLANCO
+      BTFSS     PORTC, 0    ; ¿Pulsador activo?
+      GOTO      SOLTADO     ; No, ir a limpiar estado
+      
+      BTFSC     ESTADO_P, 0 ; ¿Ya lo habíamos contado antes?
+      RETURN                ; Sí, ignorar hasta que suelte
+      
+      ; Si llegamos aquí, es un flanco ascendente potencial
+      CALL      RETARDO_5MS
+      BTFSS     PORTC, 0    ; ¿Sigue en 1 tras el ruido?
+      RETURN                ; Era un falso contacto
+      
+      ; --- Incremento válido ---
+      INCF      CONTADOR, F
+      BSF       ESTADO_P, 0 ; Marcar como presionado
+      RETURN
+
+SOLTADO
+      BCF       ESTADO_P, 0 ; Reset del estado para nuevo pulso
+      RETURN
+;====================================================================
+; Subrutina: DIVIDIR_BCD (Corregida)
+;====================================================================
+DIVIDIR_BCD
+      MOVF      CONTADOR, W
+      MOVWF     TEMP_BCD    
+      CLRF      DECENA
+      
+RESTA_10
+      MOVLW     .10
+      SUBWF     TEMP_BCD, W ; Probamos la resta: W = TEMP_BCD - 10
+      BTFSS     STATUS, C   ; ¿C=1? (Resultado positivo o cero)
+      GOTO      FIN_DIV
+      MOVWF     TEMP_BCD    ; Si fue positivo, guardamos el resto
+      INCF      DECENA, F   ; Incrementamos decenas
+      GOTO      RESTA_10
+
+FIN_DIV
+      MOVF      TEMP_BCD, W
+      MOVWF     UNIDAD      
+      RETURN
+
+;====================================================================
+; Subrutina: MOSTRAR_DISPLAYS (Ajustada para Multiplexación)
+;====================================================================
+MOSTRAR_DISPLAYS
+      ; --- Mostrar UNIDADES ---
+      CLRF      PORTD       ; Apagamos ambos displays (evita ghosting)
+      CLRF	PORTE
+      MOVF      UNIDAD, W
+      CALL      TABLA_7SEG
+      MOVWF     PORTD       ; Cargamos segmentos
+      BSF       PORTE, 1    ; Encendemos transistor Unidades (Ej: RE1)
+      BCF       PORTE, 0    ; Encendemos transistor Unidades (Ej: RE1)
+      CALL      RETARDO_5MS ; Tiempo corto para refresco rápido
+      
+      ; --- Mostrar DECENAS ---
+      CLRF      PORTD       ; Apagamos ambos displays
+      CLRF	PORTE
+      MOVF      DECENA, W
+      CALL      TABLA_7SEG
+      MOVWF     PORTD       ; Cargamos segmentos
+      BSF       PORTE, 0    ; Encendemos transistor Decenas (Ej: RE0)
+      BCF       PORTE, 1    ; Encendemos transistor Unidades (Ej: RE1)
+      CALL      RETARDO_5MS
+      
+      RETURN
+
+;====================================================================
+; Tabla y Retardos
+;====================================================================
+TABLA_7SEG
+      ANDLW     0x0F
+      ADDWF     PCL, F
+      RETLW     B'00111111' ; 0
+      RETLW     B'00000110' ; 1
+      RETLW     B'01011011' ; 2
+      RETLW     B'01001111' ; 3
+      RETLW     B'01100110' ; 4
+      RETLW     B'01101101' ; 5
+      RETLW     B'01111101' ; 6
+      RETLW     B'00000111' ; 7
+      RETLW     B'01111111' ; 8
+      RETLW     B'01101111' ; 9
+RETARDO_5MS
+		;1248 cycles
+	movlw	0xF9
+	movwf	T1
+	movlw	0x01
+	movwf	T2
+Delay_0
+	decfsz	T1, f
+	goto	$+2
+	decfsz	T2, f
+	goto	Delay_0
+
+			;2 cycles
+	goto	$+1
+	RETURN
+
+
+      END
+
+5-ADC + display 7 seg
+
+
+;====================================================================
+; main.asm - Voltímetro Digital (ADC a 3 Displays)
+;
+; Processor: PIC16F887
+; Compiler:  MPASM (Proteus)
+; Author:    LARDET, Juan Pedro
+;====================================================================
+
+#include p16f887.inc
+
+; --- Bits de Configuración (Crucial para evitar resets) ---
+      __CONFIG _CONFIG1, _INTOSCIO & _WDT_OFF 
+; --- Registros GPR ---
+      CBLOCK 0x20
+         VALOR_ADC          ; Almacena ADRESH
+         CENTENA, DECENA, UNIDAD
+         TEMP_BCD
+         T1, T2             ; Para retardos de multiplexado
+      ENDC
+
+      ORG 0x00
+      
+INICIO 
+      ; --- Configuración de Puertos ---
+      BANKSEL   ANSEL
+      BSF       ANSEL, 0    ; RA0 como Analógico
+      BANKSEL   ANSELH
+      CLRF      ANSELH
+      
+      BANKSEL   TRISA
+      BSF       TRISA, 0    ; RA0 entrada
+      CLRF      TRISD       ; BUS de datos (Segmentos)
+      CLRF      TRISE       ; Control de Transistores
+      
+      ; --- Configuración ADC ---
+      BANKSEL   ADCON1
+      MOVLW     B'00000000' ; Justificación IZQUIERDA, Vref internas
+      MOVWF     ADCON1
+      
+      BANKSEL   ADCON0
+      MOVLW     B'00000001' 
+      MOVWF     ADCON0
+
+BUCLE 
+      CALL      LEER_ADC
+      CALL      DIVIDIR_3_DIGITOS
+      CALL      MOSTRAR_DINAMICO
+      GOTO      BUCLE
+
+;====================================================================
+; Subrutinas
+;====================================================================
+
+LEER_ADC
+      NOP                   ; Tiempo de adquisición
+      BSF       ADCON0, GO  ; Inicia conversión
+ESPERA_ADC
+      BTFSC     ADCON0, GO
+      GOTO      ESPERA_ADC
+      MOVF      ADRESH, W   ; Leemos los 8 bits superiores
+      MOVWF     VALOR_ADC
+      RETURN
+
+DIVIDIR_3_DIGITOS
+      MOVF      VALOR_ADC, W
+      MOVWF     TEMP_BCD
+      CLRF      CENTENA
+      CLRF      DECENA
+
+RESTA_100
+      MOVLW     .100
+      SUBWF     TEMP_BCD, W
+      BTFSS     STATUS, C
+      GOTO      PRE_RESTA_10
+      MOVWF     TEMP_BCD
+      INCF      CENTENA, F
+      GOTO      RESTA_100
+
+PRE_RESTA_10
+RESTA_10
+      MOVLW     .10
+      SUBWF     TEMP_BCD, W
+      BTFSS     STATUS, C
+      GOTO      FIN_BCD
+      MOVWF     TEMP_BCD
+      INCF      DECENA, F
+      GOTO      RESTA_10
+
+FIN_BCD
+      MOVF      TEMP_BCD, W
+      MOVWF     UNIDAD
+      RETURN
+
+MOSTRAR_DINAMICO
+      ; --- UNIDAD (RE0) ---
+      CLRF      PORTE
+      MOVF      UNIDAD, W
+      CALL      TABLA_7SEG
+      MOVWF     PORTD
+      BSF       PORTE, 0
+      CALL      RETARDO_5MS
+      
+      ; --- DECENA (RE1) ---
+      CLRF      PORTE
+      MOVF      DECENA, W
+      CALL      TABLA_7SEG
+      MOVWF     PORTD
+      BSF       PORTE, 1
+      CALL      RETARDO_5MS
+      
+      ; --- CENTENA (RE2) ---
+      CLRF      PORTE
+      MOVF      CENTENA, W
+      CALL      TABLA_7SEG
+      MOVWF     PORTD
+      BSF       PORTE, 2      ; Pin RE2 para centenas
+      CALL      RETARDO_5MS
+      RETURN
+
+;====================================================================
+; Tabla y Tiempos
+;====================================================================
+TABLA_7SEG
+      ANDLW     0x0F
+      ADDWF     PCL, F
+      RETLW     B'00111111' ; 0
+      RETLW     B'00000110' ; 1
+      RETLW     B'01011011' ; 2
+      RETLW     B'01001111' ; 3
+      RETLW     B'01100110' ; 4
+      RETLW     B'01101101' ; 5
+      RETLW     B'01111101' ; 6
+      RETLW     B'00000111' ; 7
+      RETLW     B'01111111' ; 8
+      RETLW     B'01101111' ; 9
+
+RETARDO_5MS
+      MOVLW     D'7'
+      MOVWF     T2
+      MOVLW     D'125'
+      MOVWF     T1
+DELAY_5
+      DECFSZ    T1, F
+      GOTO      DELAY_5
+      DECFSZ    T2, F
+      GOTO      DELAY_5
+      RETURN
+
+      END
+
+6-Hola mundo LCD
+
+
+;====================================================================
+; main.asm - LCD 16x2 "Hola Mundo" (Bus de 8 bits)
+;
+; Processor: PIC16F887
+; Compiler:  MPASM (Proteus)
+; Author:    LARDET, Juan Pedro
+;====================================================================
+
+#include p16f887.inc
+
+ __CONFIG _CONFIG1, _INTOSCIO & _WDT_OFF 
+
+      CBLOCK 0x20
+         T1, T2             ; Registros para retardos
+      ENDC
+
+; --- Definición de Pines de Control ---
+#define RS PORTE, 0
+#define E  PORTE, 1
+
+      ORG 0x00
+      
+INICIO 
+      BANKSEL   ANSEL
+      CLRF      ANSEL       ; Puertos digitales
+      CLRF      ANSELH
+      
+      BANKSEL   TRISD
+      CLRF      TRISD       ; PORTD como salida (Datos)
+      CLRF      TRISE       ; PORTE como salida (Control)
+      
+      BANKSEL   PORTD
+      CLRF      PORTD
+      CLRF      PORTE
+
+      ; --- Inicialización del LCD ---
+      CALL      RETARDO_20MS ; Espera estabilización de VCC
+      
+      MOVLW     0x38        ; 8 bits, 2 líneas, 5x7 puntos
+      CALL      ENVIAR_COMANDO
+      
+      MOVLW     0x0C        ; Display ON, Cursor OFF, Blink OFF
+      CALL      ENVIAR_COMANDO
+      
+      MOVLW     0x06        ; Entry Mode: Incremento, sin desplazamiento
+      CALL      ENVIAR_COMANDO
+      
+      MOVLW     0x01        ; Limpiar pantalla
+      CALL      ENVIAR_COMANDO
+
+      ; --- Escribir "Hola Mundo" ---
+      MOVLW     'H'
+      CALL      ENVIAR_CARACTER
+      MOVLW     'o'
+      CALL      ENVIAR_CARACTER
+      MOVLW     'l'
+      CALL      ENVIAR_CARACTER
+      MOVLW     'a'
+      CALL      ENVIAR_CARACTER
+      MOVLW     ' '
+      CALL      ENVIAR_CARACTER
+      MOVLW     'M'
+      CALL      ENVIAR_CARACTER
+      MOVLW     'u'
+      CALL      ENVIAR_CARACTER
+      MOVLW     'n'
+      CALL      ENVIAR_CARACTER
+      MOVLW     'd'
+      CALL      ENVIAR_CARACTER
+      MOVLW     'o'
+      CALL      ENVIAR_CARACTER
+
+BUCLE 
+      GOTO      BUCLE       ; Fin del programa
+
+;====================================================================
+; Subrutinas de Control LCD
+;====================================================================
+
+ENVIAR_COMANDO
+      BCF       RS          ; RS = 0 (Comando)
+      MOVWF     PORTD       ; Poner comando en el bus
+      BSF       E           ; Pulso de Enable
+      NOP
+      BCF       E
+      CALL      RETARDO_20MS ; Espera a que el LCD procese
+      RETURN
+
+ENVIAR_CARACTER
+      BSF       RS          ; RS = 1 (Dato/Caracter)
+      MOVWF     PORTD       ; Poner dato en el bus
+      BSF       E           ; Pulso de Enable
+      NOP
+      BCF       E
+      CALL      RETARDO_20MS
+      RETURN
+
+;====================================================================
+; Subrutinas de Tiempo
+;====================================================================
+RETARDO_20MS
+      		;4998 cycles
+	movlw	0xE7
+	movwf	T1
+	movlw	0x04
+	movwf	T2
+Delay_0
+	decfsz	T1, f
+	goto	$+2
+	decfsz	T2, f
+	goto	Delay_0
+
+			;2 cycles
+	goto	$+1
+      RETURN
+
+      END
+
+7-ADC+LCD
+
+
+
+;====================================================================
+; main.asm - Termómetro Digital 10-bits con LM35 y LCD
+;
+; Registro de: Tec. LARDET, Juan Pedro, para la EPET N°14 
+;              "Doña Gregoria Matorras de San Martín" de Neuquén (Argentina)
+; Processor:   PIC16F887
+; Compiler:    MPASM (Proteus)
+;====================================================================
+
+#include p16f887.inc
+
+ __CONFIG _CONFIG1, _INTOSCIO & _WDT_OFF & _MCLRE_OFF
+
+;====================================================================
+; Registros GPR
+;====================================================================
+      CBLOCK 0x20
+         CENTENA
+         DECENA
+         UNIDAD
+         T1, T2             ; Retardos
+      ENDC
+      
+      CBLOCK 0x70
+	 ADC_ALTO           ; Bits 8 y 9
+         ADC_BAJO           ; Bits 0 a 7
+      ENDC
+
+      #define RS PORTE, 0
+      #define E  PORTE, 1
+
+      ORG 0x00
+      
+INICIO 
+      ; --- Configuración Hardware ---
+      BANKSEL   ANSEL
+      MOVLW 	.1
+      MOVWF	ANSEL
+      
+      
+      BANKSEL   TRISD
+      CLRF      TRISD       ; BUS LCD
+      CLRF      TRISE       ; Control LCD
+      BSF       TRISA, 0    ; Entrada sensor
+
+      ; --- Configuración ADC (10 BITS) ---
+      BANKSEL   ADCON1
+      MOVLW     B'10000000' ; ADFM=1 (Justificación Derecha), Vref=VDD
+      MOVWF     ADCON1
+      
+      BANKSEL   ADCON0
+      MOVLW     B'00000001'
+      MOVWF     ADCON0
+
+      ; --- Inicialización LCD ---
+      CALL      RETARDO_20MS
+      MOVLW     0x38        ; 8 bits, 2 líneas
+      CALL      ENVIAR_COMANDO
+      MOVLW     0x0C        ; Display ON
+      CALL      ENVIAR_COMANDO
+      MOVLW     0x01        ; Clear
+      CALL      ENVIAR_COMANDO
+
+BUCLE 
+      CALL      LEER_ADC_10BITS
+      CALL      DIVIDIR_BCD_16BITS
+      CALL      ACTUALIZAR_PANTALLA
+      CALL	RETARDO_20MS
+      CALL	RETARDO_20MS
+      CALL	RETARDO_20MS
+      CALL	RETARDO_20MS
+      CALL	RETARDO_20MS      
+      GOTO      BUCLE
+
+;====================================================================
+; Subrutina: LEER_ADC_10BITS
+;====================================================================
+LEER_ADC_10BITS
+      NOP
+      NOP
+      BSF       ADCON0, GO
+      
+ESPERA
+      BTFSC     ADCON0, GO
+      GOTO      ESPERA
+      
+      ; --- Leer ADRESH (Banco 0) ---
+      BANKSEL   ADRESH
+      MOVF      ADRESH, W
+      MOVWF     ADC_ALTO
+      
+      ; --- Leer ADRESL (Banco 1) ---
+      BANKSEL   ADRESL
+      MOVF      ADRESL, W
+      
+      ; --- Guardar en GPR (Banco 0) ---
+      BANKSEL   ADC_BAJO
+      MOVWF     ADC_BAJO
+      RETURN
+
+;====================================================================
+; Subrutina: DIVIDIR_BCD_16BITS (Adaptado para STEAM)
+;====================================================================
+;====================================================================
+; Subrutina: DIVIDIR_BCD_16BITS 
+;====================================================================
+DIVIDIR_BCD_16BITS
+      
+      ; --- AJUSTE DE ESCALA (División por 2) ---
+      ; Compensa los 4.88mV del ADC vs los 10mV del LM35
+      BCF       STATUS, C     ; Limpiamos Carry para que no entre "basura"
+      RRF       ADC_ALTO, F   ; El bit 0 de la parte alta cae en el Carry
+      RRF       ADC_BAJO, F   ; Ese Carry entra por el bit 7 de la parte baja
+
+      ; --- INICIO ALGORITMO BCD ---
+      CLRF      CENTENA
+      CLRF      DECENA
+
+RESTA_100
+      ; Validamos si el número de 16 bits es >= 100
+      MOVF      ADC_ALTO, F
+      BTFSS     STATUS, Z
+      GOTO      EJECUTAR_R100 ; Si ALTO > 0, seguro es >= 256 (y por ende >= 100)
+      
+      MOVLW     .100
+      SUBWF     ADC_BAJO, W
+      BTFSS     STATUS, C     ; ¿BAJO >= 100?
+      GOTO      PRE_RESTA_10  ; No, pasamos a decenas
+
+EJECUTAR_R100
+      MOVLW     .100
+      SUBWF     ADC_BAJO, F
+      BTFSS     STATUS, C     ; ¿Hubo préstamo (Borrow)?
+      DECF      ADC_ALTO, F   ; Sí, le sacamos 1 a la parte alta
+      INCF      CENTENA, F
+      GOTO      RESTA_100
+      
+PRE_RESTA_10
+RESTA_10
+      MOVLW     .10
+      SUBWF     ADC_BAJO, W
+      BTFSS     STATUS, C
+      GOTO      FIN_BCD
+      MOVWF     ADC_BAJO
+      INCF      DECENA, F
+      GOTO      RESTA_10
+      
+FIN_BCD
+      MOVF      ADC_BAJO, W
+      MOVWF     UNIDAD
+      RETURN
+;====================================================================
+; Subrutinas Visualización y LCD (Idénticas al anterior)
+;====================================================================
+ACTUALIZAR_PANTALLA
+      MOVLW     0x80        ; Cursor inicio
+      CALL      ENVIAR_COMANDO
+      MOVLW     'T'
+      CALL      ENVIAR_CARACTER
+      MOVLW     'e'
+      CALL      ENVIAR_CARACTER
+      MOVLW     'm'
+      CALL      ENVIAR_CARACTER
+      MOVLW     'p'
+      CALL      ENVIAR_CARACTER
+      MOVLW     ':'
+      CALL      ENVIAR_CARACTER
+      MOVLW     ' '
+      CALL      ENVIAR_CARACTER
+      
+      MOVF      CENTENA, W
+      ADDLW     0x30
+      CALL      ENVIAR_CARACTER
+      MOVF      DECENA, W
+      ADDLW     0x30
+      CALL      ENVIAR_CARACTER
+      MOVF      UNIDAD, W
+      ADDLW     0x30
+      CALL      ENVIAR_CARACTER
+      MOVLW     0xDF
+      CALL      ENVIAR_CARACTER
+      MOVLW     'C'
+      CALL      ENVIAR_CARACTER
+      RETURN
+
+ENVIAR_COMANDO
+      BCF       RS
+      MOVWF     PORTD
+      BSF       E
+      CALL      RETARDO_5MS
+      BCF       E
+      CALL      RETARDO_5MS
+      RETURN
+
+ENVIAR_CARACTER
+      BSF       RS
+      MOVWF     PORTD
+      BSF       E
+      CALL      RETARDO_5MS
+      BCF       E
+      CALL      RETARDO_5MS
+      RETURN
+
+RETARDO_20MS
+      ; 19998 ciclos
+      MOVLW     0x9E
+      MOVWF     T1
+      MOVLW     0x10
+      MOVWF     T2
+Delay_20
+      DECFSZ    T1, F
+      GOTO      $+2
+      DECFSZ    T2, F
+      GOTO      Delay_20
+      GOTO      $+1
+      RETURN
+
+
+RETARDO_5MS
+      ; 4998 ciclos
+      MOVLW     0xE7
+      MOVWF     T1
+      MOVLW     0x04
+      MOVWF     T2
+Delay_5
+      DECFSZ    T1, F
+      GOTO      $+2
+      DECFSZ    T2, F
+      GOTO      Delay_5
+      GOTO      $+1
+      RETURN
+
+      END
+
+8-ADC+LCD+interrupciones
+
+;====================================================================
+; main.asm - Termómetro Digital 10-bits con LM35 y LCD
+;
+; Registro de: Tec. LARDET, Juan Pedro, para la EPET N°14 
+;              "Doña Gregoria Matorras de San Martín" de Neuquén (Argentina)
+; Processor:   PIC16F887
+; Compiler:    MPASM (Proteus)
+;====================================================================
+
+#include p16f887.inc
+
+ __CONFIG _CONFIG1, _INTOSCIO & _WDT_OFF & _MCLRE_OFF
+
+;====================================================================
+; Registros GPR
+;====================================================================
+      CBLOCK 0x20
+         CENTENA
+         DECENA
+         UNIDAD
+         T1, T2             ; Retardos
+      ENDC
+      
+      CBLOCK 0x70
+	 ADC_ALTO           ; Bits 8 y 9
+         ADC_BAJO           ; Bits 0 a 7
+	 W_TEMP
+	 STATUS_TEMP
+      ENDC
+
+      #define RS PORTE, 0
+      #define E  PORTE, 1
+
+      ORG 0x00
+      GOTO INICIO
+      
+      ORG 0x04
+ISR
+      ; --- GUARDADO DE CONTEXTO ---
+      MOVWF     W_TEMP
+      SWAPF     STATUS, W
+      MOVWF     STATUS_TEMP
+
+      ; --- LÓGICA DE ALTERNANCIA (TOGGLE) ---
+      BTFSS     PORTE, 2    ; ¿Está prendido (1)?
+      GOTO      PRENDER     ; No (es 0), entonces vamos a prenderlo
+      GOTO      APAGAR      ; Sí (es 1), entonces vamos a apagarlo
+
+APAGAR
+      BCF       PORTE, 2
+      GOTO      SALIR_ISR
+PRENDER
+      BSF       PORTE, 2
+
+SALIR_ISR
+      BCF       INTCON, INTF ; Limpiamos la bandera de interrupción
+
+      ; --- RESTAURAR CONTEXTO ---
+      SWAPF     STATUS_TEMP, W
+      MOVWF     STATUS
+      SWAPF     W_TEMP, F
+      SWAPF     W_TEMP, W
+      RETFIE
+      
+INICIO 
+      ; --- Configuración Hardware ---
+      BANKSEL   ANSEL
+      MOVLW 	.1
+      MOVWF	ANSEL
+      BANKSEL 	ANSELH
+      CLRF 	ANSELH
+      
+      BANKSEL   INTCON
+      MOVLW	B'10010000'
+      MOVWF	INTCON
+      
+      BANKSEL   TRISD
+      CLRF      TRISD       ; BUS LCD
+      CLRF      TRISE       ; Control LCD
+      BSF       TRISA, 0    ; Entrada sensor
+
+      BANKSEL 	PORTA
+      CLRF	PORTA
+      CLRF	PORTD
+      CLRF	PORTE
+      ; --- Configuración ADC (10 BITS) ---
+      BANKSEL   ADCON1
+      MOVLW     B'10000000' ; ADFM=1 (Justificación Derecha), Vref=VDD
+      MOVWF     ADCON1
+      
+      BANKSEL   ADCON0
+      MOVLW     B'00000001'
+      MOVWF     ADCON0
+
+      ; --- Inicialización LCD ---
+      CALL      RETARDO_20MS
+      MOVLW     0x38        ; 8 bits, 2 líneas
+      CALL      ENVIAR_COMANDO
+      MOVLW     0x0C        ; Display ON
+      CALL      ENVIAR_COMANDO
+      MOVLW     0x01        ; Clear
+      CALL      ENVIAR_COMANDO
+
+BUCLE 
+      CALL      LEER_ADC_10BITS
+      CALL      DIVIDIR_BCD_16BITS
+      CALL      ACTUALIZAR_PANTALLA
+      CALL	RETARDO_20MS
+      CALL	RETARDO_20MS
+      CALL	RETARDO_20MS
+      CALL	RETARDO_20MS
+      CALL	RETARDO_20MS      
+      GOTO      BUCLE
+
+;====================================================================
+; Subrutina: LEER_ADC_10BITS
+;====================================================================
+LEER_ADC_10BITS
+      NOP
+      NOP
+      BSF       ADCON0, GO
+      
+ESPERA
+      BTFSC     ADCON0, GO
+      GOTO      ESPERA
+      
+      ; --- Leer ADRESH (Banco 0) ---
+      BANKSEL   ADRESH
+      MOVF      ADRESH, W
+      MOVWF     ADC_ALTO
+      
+      ; --- Leer ADRESL (Banco 1) ---
+      BANKSEL   ADRESL
+      MOVF      ADRESL, W
+      
+      ; --- Guardar en GPR (Banco 0) ---
+      BANKSEL   ADC_BAJO
+      MOVWF     ADC_BAJO
+      RETURN
+
+;====================================================================
+; Subrutina: DIVIDIR_BCD_16BITS (Adaptado para STEAM)
+;====================================================================
+;====================================================================
+; Subrutina: DIVIDIR_BCD_16BITS 
+;====================================================================
+DIVIDIR_BCD_16BITS
+      
+      ; --- AJUSTE DE ESCALA (División por 2) ---
+      ; Compensa los 4.88mV del ADC vs los 10mV del LM35
+      BCF       STATUS, C     ; Limpiamos Carry para que no entre "basura"
+      RRF       ADC_ALTO, F   ; El bit 0 de la parte alta cae en el Carry
+      RRF       ADC_BAJO, F   ; Ese Carry entra por el bit 7 de la parte baja
+
+      ; --- INICIO ALGORITMO BCD ---
+      CLRF      CENTENA
+      CLRF      DECENA
+
+RESTA_100
+      ; Validamos si el número de 16 bits es >= 100
+      MOVF      ADC_ALTO, F
+      BTFSS     STATUS, Z
+      GOTO      EJECUTAR_R100 ; Si ALTO > 0, seguro es >= 256 (y por ende >= 100)
+      
+      MOVLW     .100
+      SUBWF     ADC_BAJO, W
+      BTFSS     STATUS, C     ; ¿BAJO >= 100?
+      GOTO      PRE_RESTA_10  ; No, pasamos a decenas
+
+EJECUTAR_R100
+      MOVLW     .100
+      SUBWF     ADC_BAJO, F
+      BTFSS     STATUS, C     ; ¿Hubo préstamo (Borrow)?
+      DECF      ADC_ALTO, F   ; Sí, le sacamos 1 a la parte alta
+      INCF      CENTENA, F
+      GOTO      RESTA_100
+      
+PRE_RESTA_10
+RESTA_10
+      MOVLW     .10
+      SUBWF     ADC_BAJO, W
+      BTFSS     STATUS, C
+      GOTO      FIN_BCD
+      MOVWF     ADC_BAJO
+      INCF      DECENA, F
+      GOTO      RESTA_10
+      
+FIN_BCD
+      MOVF      ADC_BAJO, W
+      MOVWF     UNIDAD
+      RETURN
+;====================================================================
+; Subrutinas Visualización y LCD (Idénticas al anterior)
+;====================================================================
+ACTUALIZAR_PANTALLA
+      MOVLW     0x80        ; Cursor inicio
+      CALL      ENVIAR_COMANDO
+      MOVLW     'T'
+      CALL      ENVIAR_CARACTER
+      MOVLW     'e'
+      CALL      ENVIAR_CARACTER
+      MOVLW     'm'
+      CALL      ENVIAR_CARACTER
+      MOVLW     'p'
+      CALL      ENVIAR_CARACTER
+      MOVLW     ':'
+      CALL      ENVIAR_CARACTER
+      MOVLW     ' '
+      CALL      ENVIAR_CARACTER
+      
+      MOVF      CENTENA, W
+      ADDLW     0x30
+      CALL      ENVIAR_CARACTER
+      MOVF      DECENA, W
+      ADDLW     0x30
+      CALL      ENVIAR_CARACTER
+      MOVF      UNIDAD, W
+      ADDLW     0x30
+      CALL      ENVIAR_CARACTER
+      MOVLW     0xDF
+      CALL      ENVIAR_CARACTER
+      MOVLW     'C'
+      CALL      ENVIAR_CARACTER
+      RETURN
+
+ENVIAR_COMANDO
+      BCF       RS
+      MOVWF     PORTD
+      BSF       E
+      CALL      RETARDO_5MS
+      BCF       E
+      CALL      RETARDO_5MS
+      RETURN
+
+ENVIAR_CARACTER
+      BSF       RS
+      MOVWF     PORTD
+      BSF       E
+      CALL      RETARDO_5MS
+      BCF       E
+      CALL      RETARDO_5MS
+      RETURN
+
+RETARDO_20MS
+      ; 19998 ciclos
+      MOVLW     0x9E
+      MOVWF     T1
+      MOVLW     0x10
+      MOVWF     T2
+Delay_20
+      DECFSZ    T1, F
+      GOTO      $+2
+      DECFSZ    T2, F
+      GOTO      Delay_20
+      GOTO      $+1
+      RETURN
+
+
+RETARDO_5MS
+      ; 4998 ciclos
+      MOVLW     0xE7
+      MOVWF     T1
+      MOVLW     0x04
+      MOVWF     T2
+Delay_5
+      DECFSZ    T1, F
+      GOTO      $+2
+      DECFSZ    T2, F
+      GOTO      Delay_5
+      GOTO      $+1
+      RETURN
+      END
+
+9-PWM con ADC
+
+
+; ==============================================================================
+; Proyecto: Control de LED por PWM (10 bits) mapeado desde ADC
+; Hardware: PIC16F887
+; Oscilador: Interno a 8 MHz (INTOSCIO)
+; Entradas: RA0 (AN0) - Potenciómetro
+; Salidas: RC2 (CCP1) - LED
+; ==============================================================================
+
+    #include <p16f887.inc>
+
+    ; --- Configuración de Fuses ---
+    __CONFIG _CONFIG1, _INTRC_OSC_NOCLKOUT & _WDT_OFF & _PWRTE_ON & _MCLRE_ON & _CP_OFF & _CPD_OFF & _BOREN_OFF & _IESO_OFF & _FCMEN_OFF & _LVP_OFF
+    __CONFIG _CONFIG2, _BOR40V & _WRT_OFF
+
+    ; --- Variables ---
+    ; Usamos la zona de RAM no bancada para facilitar el acceso rápido
+    TEMP    EQU     0x70  
+
+    ORG     0x000
+    GOTO    INICIO
+
+; ==============================================================================
+; INICIALIZACIÓN DEL SISTEMA
+; ==============================================================================
+INICIO
+    ; --- Configurar Oscilador Interno a 8 MHz ---
+    BANKSEL OSCCON
+    MOVLW   b'01110001'     ; IRCF = 111 (8 MHz), SCS = 1 (Reloj interno)
+    MOVWF   OSCCON
+
+    ; --- Configurar Puertos ---
+    BANKSEL TRISA
+    BSF     TRISA, 0        ; RA0 como entrada (Potenciómetro)
+    BCF     TRISC, 2        ; RC2 como salida (PWM - LED)
+
+    ; --- Configurar Entradas Analógicas ---
+    BANKSEL ANSEL
+    CLRF    ANSEL           ; Limpiamos todos los canales primero
+    CLRF    ANSELH
+    BSF     ANSEL, 0        ; Configuramos SOLO AN0 (RA0) como analógico
+
+    ; --- Configurar Módulo ADC ---
+    BANKSEL ADCON1
+    BCF     ADCON1, ADFM    ; Justificación a la IZQUIERDA (vital para PWM 10-bit)
+    BCF     ADCON1, VCFG1   ; Vref- a VSS (GND)
+    BCF     ADCON1, VCFG0   ; Vref+ a VDD (5V)
+
+    BANKSEL ADCON0
+    ; ADCS=01 (Fosc/16), CHS=0000 (Canal AN0), ADON=1 (Módulo encendido)
+    MOVLW   b'01000001'     
+    MOVWF   ADCON0
+
+    ; --- Configurar Módulo PWM (CCP1) ---
+    BANKSEL PR2
+    MOVLW   d'255'          ; PR2 al máximo para resolución completa de 10 bits
+    MOVWF   PR2
+
+    BANKSEL CCP1CON
+    MOVLW   b'00001100'     ; Modo PWM activado (CCP1M = 1100)
+    MOVWF   CCP1CON
+
+    ; --- Configurar y Encender Timer2 ---
+    BANKSEL T2CON
+    MOVLW   b'00000100'     ; Pre-escalador 1:1, Timer2 ON
+    MOVWF   T2CON
+
+; ==============================================================================
+; BUCLE PRINCIPAL
+; ==============================================================================
+BUCLE_PRINCIPAL
+
+    ; 1. Iniciar lectura del potenciómetro
+    BANKSEL ADCON0
+    BSF     ADCON0, GO      ; Iniciar la conversión A/D
+
+ESPERA_ADC
+    BTFSC   ADCON0, GO      ; ¿Terminó la conversión?
+    GOTO    ESPERA_ADC      ; No, seguimos esperando
+
+    ; 2. Cargar los 8 bits más significativos (MSB)
+    BANKSEL ADRESH
+    MOVF    ADRESH, W       ; Al estar justificado a la izquierda, ADRESH tiene los MSB
+    BANKSEL CCPR1L
+    MOVWF   CCPR1L          ; Los pasamos directo al registro principal del PWM
+
+    ; 3. Cargar los 2 bits menos significativos (LSB)
+    ; ADRESL tiene los LSB en los bits <7:6>. 
+    ; CCP1CON necesita recibir estos bits en las posiciones <5:4>.
+    BANKSEL ADRESL
+    MOVF    ADRESL, W       
+    MOVWF   TEMP            ; Guardamos en RAM no bancada
+    
+    RRF     TEMP, F         ; Rotamos a la derecha...
+    RRF     TEMP, F         ; ...dos veces. Ahora los bits están en <5:4>
+    
+    MOVLW   b'00110000'     ; Máscara para conservar solo los bits <5:4>
+    ANDWF   TEMP, F         
+    
+    MOVLW   b'00001100'     ; Mantenemos la configuración del modo PWM
+    IORWF   TEMP, W         ; Unimos la configuración con los datos del ADC
+    
+    BANKSEL CCP1CON
+    MOVWF   CCP1CON         ; Actualizamos el registro final del PWM con los LSB
+
+    ; 4. Repetir ciclo
+    GOTO    BUCLE_PRINCIPAL
+
+    END
+
+10-Timer0 y timer1 en pulsometro
+
+; ==============================================================================
+; PROYECTO: CONTADOR DE PULSOS CARDIACOS (PPM) CON LCD
+; HARDWARE: PIC16F887
+; OSCILADOR: INTOSCIO 8 MHz
+; VERSION CORREGIDA - VENTANA DE 5 SEGUNDOS
+; ==============================================================================
+
+    #include <p16f887.inc>
+
+    ; --- CONFIGURACIÓN DE FUSES ---
+    __CONFIG _CONFIG1, _INTRC_OSC_NOCLKOUT & _WDT_OFF & _PWRTE_ON & _MCLRE_ON & _CP_OFF & _CPD_OFF & _BOREN_OFF & _IESO_OFF & _FCMEN_OFF & _LVP_OFF
+    __CONFIG _CONFIG2, _BOR40V & _WRT_OFF
+
+
+; ==============================================================================
+; VARIABLES EN RAM (Bancos 0 y comunes)
+; ==============================================================================
+    CBLOCK 0x20
+        ; --- Variables de Interrupción ---
+        W_TEMP          
+        STATUS_TEMP     
+        
+        ; --- Contadores de Tiempo ---
+        CONT_250MS      
+        CONT_SEGUNDOS   
+        
+        ; --- Variables de Cálculo ---
+        PULSACIONES     
+        PPM_FINAL_L     ; Parte baja del resultado (16 bits)
+        PPM_FINAL_H     ; Parte alta
+        TEMP_PPM_L      ; Temporal para multiplicación
+        TEMP_PPM_H
+        FLAG_ACTUALIZAR 
+        
+        ; --- Variables para BCD y LCD ---
+        ADC_ALTO        ; Para la conversión (parte alta)
+        ADC_BAJO        ; Parte baja
+        MILES
+        CENTENA
+        DECENA
+        UNIDAD
+        LCD_TEMP
+        DELAY_CONT1
+        DELAY_CONT2
+    ENDC
+
+
+; ==============================================================================
+; VECTORES PRINCIPALES
+; ==============================================================================
+    ORG     0x00
+    GOTO    INICIO
+
+    ORG     0x04
+    GOTO    RSI_INTERRUPCION
+
+
+; ==============================================================================
+; RUTINA DE SERVICIO DE INTERRUPCIÓN (RSI) - TMR1
+; ==============================================================================
+RSI_INTERRUPCION
+    
+    ; --- 1. Guardar Contexto ---
+    MOVWF   W_TEMP
+    SWAPF   STATUS, W
+    MOVWF   STATUS_TEMP
+
+    ; --- Asegurar banco 0 ---
+    BCF     STATUS, RP0
+    BCF     STATUS, RP1
+
+    ; --- 2. Verificar Origen ---
+    BTFSS   PIR1, TMR1IF
+    GOTO    SALIR_RSI
+
+    ; --- 3. Recargar TMR1 para 250ms ---
+    BCF     PIR1, TMR1IF    
+    MOVLW   0x0B
+    MOVWF   TMR1H
+    MOVLW   0xDC
+    MOVWF   TMR1L
+
+    ; --- 4. Lógica de Temporización ---
+    DECFSZ  CONT_250MS, F   ; ¿Pasaron 250 ms?
+    GOTO    SALIR_RSI        ; No, salir
+    
+    MOVLW   d'4'            ; Recargar para el próximo segundo
+    MOVWF   CONT_250MS
+
+    DECFSZ  CONT_SEGUNDOS, F ; ¿Pasaron 5 segundos?
+    GOTO    SALIR_RSI        
+    
+    ; --- 5. Fin de Ventana de 5 Segundos ---
+    MOVLW   d'5'
+    MOVWF   CONT_SEGUNDOS    
+
+    MOVF    TMR0, W         ; Leer pulsos contados
+    MOVWF   PULSACIONES
+    CLRF    TMR0            ; Reiniciar TMR0
+
+    ; --- 6. Calcular PPM (Pulsaciones * 12) en 16 bits ---
+    ; Primero x*4 en PPM_FINAL
+    MOVF    PULSACIONES, W
+    MOVWF   PPM_FINAL_L
+    CLRF    PPM_FINAL_H
+    BCF     STATUS, C
+    RLF     PPM_FINAL_L, F
+    RLF     PPM_FINAL_H, F
+    BCF     STATUS, C
+    RLF     PPM_FINAL_L, F
+    RLF     PPM_FINAL_H, F   ; PPM_FINAL = x*4
+
+    ; Luego x*8 en TEMP
+    MOVF    PULSACIONES, W
+    MOVWF   TEMP_PPM_L
+    CLRF    TEMP_PPM_H
+    BCF     STATUS, C
+    RLF     TEMP_PPM_L, F
+    RLF     TEMP_PPM_H, F
+    BCF     STATUS, C
+    RLF     TEMP_PPM_L, F
+    RLF     TEMP_PPM_H, F
+    BCF     STATUS, C
+    RLF     TEMP_PPM_L, F
+    RLF     TEMP_PPM_H, F   ; TEMP = x*8
+
+    ; Sumar: PPM_FINAL = x*4 + x*8 = x*12
+    MOVF    TEMP_PPM_L, W
+    ADDWF   PPM_FINAL_L, F
+    BTFSC   STATUS, C
+    INCF    PPM_FINAL_H, F
+    MOVF    TEMP_PPM_H, W
+    ADDWF   PPM_FINAL_H, F
+
+    ; --- 7. Avisar al Bucle Principal ---
+    BSF     FLAG_ACTUALIZAR, 0
+
+SALIR_RSI
+    ; --- 8. Restaurar Contexto ---
+    SWAPF   STATUS_TEMP, W
+    MOVWF   STATUS
+    SWAPF   W_TEMP, F
+    SWAPF   W_TEMP, W
+    RETFIE
+
+
+; ==============================================================================
+; INICIALIZACIÓN DEL SISTEMA
+; ==============================================================================
+INICIO
+    
+    ; --- Configurar Reloj ---
+    BANKSEL OSCCON
+    MOVLW   b'01110001'     ; 8 MHz
+    MOVWF   OSCCON
+    ; Esperar estabilización
+    CALL    RETARDO_15MS
+
+    ; --- Configurar Puertos ---
+    BANKSEL TRISA
+    BSF     TRISA, 4        ; RA4 (T0CKI) como entrada
+    CLRF    TRISD           ; PORTD completo como salida para LCD
+    
+    BANKSEL ANSEL
+    CLRF    ANSEL           ; Pines digitales
+    CLRF    ANSELH
+
+    ; --- Configurar TMR0 (Contador) ---
+    BANKSEL OPTION_REG
+    MOVLW   b'00101000'     ; Reloj externo (RA4), Flanco subida, Prescaler a WDT
+    MOVWF   OPTION_REG
+
+    ; --- Configurar TMR1 (Temporizador) ---
+    BANKSEL T1CON
+    MOVLW   b'00110001'     ; Prescaler 1:8, Osc interno, TMR1 ON
+    MOVWF   T1CON
+
+    ; --- Valores Iniciales ---
+    BANKSEL CONT_250MS
+    MOVLW   d'4'
+    MOVWF   CONT_250MS
+    MOVLW   d'5'            ; Ventana de 5 segundos
+    MOVWF   CONT_SEGUNDOS
+    CLRF    FLAG_ACTUALIZAR
+    CLRF    TMR0
+    CLRF    PORTD
+
+    ; --- Iniciar Módulos ---
+    CALL    LCD_INICIA
+
+    ; --- Limpiar bandera de interrupción TMR1 ---
+    BANKSEL PIR1
+    BCF     PIR1, TMR1IF
+
+    ; --- Habilitar Interrupciones ---
+    BANKSEL PIE1
+    BSF     PIE1, TMR1IE    
+    
+    BANKSEL INTCON
+    BSF     INTCON, PEIE    
+    BSF     INTCON, GIE     
+
+
+; ==============================================================================
+; BUCLE PRINCIPAL
+; ==============================================================================
+BUCLE_PRINCIPAL
+
+    BTFSS   FLAG_ACTUALIZAR, 0  ; Esperar hasta que pasen 5 segundos
+    GOTO    BUCLE_PRINCIPAL     
+
+    ; --- 1. Limpiar Bandera ---
+    BCF     FLAG_ACTUALIZAR, 0  
+
+    ; --- 2. Preparar Variables para BCD ---
+    MOVF    PPM_FINAL_H, W
+    MOVWF   ADC_ALTO
+    MOVF    PPM_FINAL_L, W
+    MOVWF   ADC_BAJO
+
+    ; --- 3. Convertir a BCD (4 dígitos) ---
+    CALL    DIVIDIR_BCD_16BITS
+
+    ; --- 4. Mostrar en LCD ---
+    ; Posicionar cursor en línea 1, posición 1
+    MOVLW   0x80
+    CALL    LCD_COMANDO
+    
+    ; Imprimir Miles
+    MOVF    MILES, W
+    ADDLW   '0'             ; Convertir a ASCII
+    CALL    LCD_CARACTER
+    
+    ; Imprimir Centenas
+    MOVF    CENTENA, W
+    ADDLW   '0'
+    CALL    LCD_CARACTER
+    
+    ; Imprimir Decenas
+    MOVF    DECENA, W
+    ADDLW   '0'
+    CALL    LCD_CARACTER
+
+    ; Imprimir Unidades
+    MOVF    UNIDAD, W
+    ADDLW   '0'
+    CALL    LCD_CARACTER
+
+    ; Imprimir texto " PPM"
+    MOVLW   ' '
+    CALL    LCD_CARACTER
+    MOVLW   'P'
+    CALL    LCD_CARACTER
+    MOVLW   'P'
+    CALL    LCD_CARACTER
+    MOVLW   'M'
+    CALL    LCD_CARACTER
+
+    ; --- 5. Volver a esperar ---
+    GOTO    BUCLE_PRINCIPAL
+
+
+; ==============================================================================
+; RUTINAS MATEMÁTICAS (CONVERSIÓN BCD de 16 bits a 4 dígitos)
+; Entrada: ADC_ALTO:ADC_BAJO (16 bits)
+; Salida: MILES, CENTENA, DECENA, UNIDAD
+; ==============================================================================
+DIVIDIR_BCD_16BITS
+    CLRF    MILES
+    CLRF    CENTENA
+    CLRF    DECENA
+
+    ; --- Miles: restar 1000 mientras sea >= 1000 ---
+MILES_LOOP
+    ; Comparar con 1000 (0x03E8)
+    ; Primero parte alta
+    MOVF    ADC_ALTO, W
+    SUBLW   0x03        ; W = 3 - ADC_ALTO, C=1 si ADC_ALTO <= 3
+    BTFSS   STATUS, C   ; Si C=0, ADC_ALTO > 3, entonces >=1000
+    GOTO    RESTAR_MIL
+    ; Si C=1, entonces ADC_ALTO <= 3. Verificar si es igual a 3
+    MOVF    ADC_ALTO, W
+    XORLW   0x03
+    BTFSS   STATUS, Z   ; Si Z=0, no es igual a 3, entonces ADC_ALTO < 3 -> menor
+    GOTO    CENTENAS
+    ; Si igual a 3, comparar parte baja con 0xE8
+    MOVLW   0xE8
+    SUBWF   ADC_BAJO, W ; W = ADC_BAJO - 0xE8, C=1 si ADC_BAJO >= 0xE8
+    BTFSS   STATUS, C
+    GOTO    CENTENAS    ; Si ADC_BAJO < 0xE8, entonces <1000
+RESTAR_MIL
+    ; Restar 1000 (0x03E8) del número
+    MOVLW   0xE8
+    SUBWF   ADC_BAJO, F
+    BTFSS   STATUS, C
+    DECF    ADC_ALTO, F
+    MOVLW   0x03
+    SUBWF   ADC_ALTO, F
+    ; Incrementar contador de miles
+    INCF    MILES, F
+    GOTO    MILES_LOOP
+
+CENTENAS
+    ; --- Centenas: restar 100 mientras sea >= 100 ---
+CENT_LOOP
+    ; Comparar con 100 (0x0064)
+    ; Primero parte alta
+    MOVF    ADC_ALTO, W
+    BTFSS   STATUS, Z   ; Si ADC_ALTO > 0, entonces >=100 (pues >256)
+    GOTO    RESTAR_CENT
+    ; Si ADC_ALTO = 0, comparar parte baja con 100
+    MOVLW   .100
+    SUBWF   ADC_BAJO, W
+    BTFSS   STATUS, C
+    GOTO    DECENAS     ; Si <100, salir
+RESTAR_CENT
+    ; Restar 100
+    MOVLW   .100
+    SUBWF   ADC_BAJO, F
+    BTFSS   STATUS, C
+    DECF    ADC_ALTO, F
+    INCF    CENTENA, F
+    GOTO    CENT_LOOP
+
+DECENAS
+    ; --- Decenas: restar 10 mientras sea >= 10 ---
+DEC_LOOP
+    ; Comparar con 10
+    MOVF    ADC_ALTO, W
+    BTFSS   STATUS, Z   ; Si ADC_ALTO > 0, entonces >=10
+    GOTO    RESTAR_DEC
+    ; Si ADC_ALTO = 0, comparar parte baja con 10
+    MOVLW   .10
+    SUBWF   ADC_BAJO, W
+    BTFSS   STATUS, C
+    GOTO    FIN_BCD
+RESTAR_DEC
+    MOVLW   .10
+    SUBWF   ADC_BAJO, F
+    BTFSS   STATUS, C
+    DECF    ADC_ALTO, F
+    INCF    DECENA, F
+    GOTO    DEC_LOOP
+
+FIN_BCD
+    MOVF    ADC_BAJO, W
+    MOVWF   UNIDAD
+    RETURN
+
+
+; ==============================================================================
+; RUTINAS DE CONTROL DE LCD (Modo 4 bits en PORTD)
+; Conexiones: RS = RD2, EN = RD3, D4-D7 = RD4-RD7
+; ==============================================================================
+LCD_INICIA
+    CALL    RETARDO_15MS
+    
+    MOVLW   0x02            ; Inicializar en modo 4 bits
+    CALL    LCD_COMANDO
+    
+    MOVLW   0x28            ; Interfaz 4 bits, 2 líneas, 5x8
+    CALL    LCD_COMANDO
+    
+    MOVLW   0x0C            ; Display ON, Cursor OFF
+    CALL    LCD_COMANDO
+    
+    MOVLW   0x01            ; Limpiar Display
+    CALL    LCD_COMANDO
+    CALL    RETARDO_15MS
+    RETURN
+
+LCD_COMANDO
+    MOVWF   LCD_TEMP        
+    ; Enviar nibble alto
+    MOVF    LCD_TEMP, W
+    ANDLW   0xF0            ; Quedarse con el nibble alto
+    MOVWF   PORTD
+    BCF     PORTD, 2        ; RS = 0 (Comando)
+    BSF     PORTD, 3        ; EN = 1
+    NOP
+    BCF     PORTD, 3        ; EN = 0
+    CALL    RETARDO_1MS
+
+    ; Enviar nibble bajo
+    SWAPF   LCD_TEMP, W     
+    ANDLW   0xF0            ; Quedarse con el nibble bajo (después de swap)
+    MOVWF   PORTD
+    BCF     PORTD, 2        ; RS = 0 (Comando)
+    BSF     PORTD, 3        ; EN = 1
+    NOP
+    BCF     PORTD, 3        ; EN = 0
+    CALL    RETARDO_1MS
+    RETURN
+
+LCD_CARACTER
+    MOVWF   LCD_TEMP        
+    ; Enviar nibble alto
+    MOVF    LCD_TEMP, W
+    ANDLW   0xF0            ; Nibble alto
+    MOVWF   PORTD
+    BSF     PORTD, 2        ; RS = 1 (Dato)
+    BSF     PORTD, 3        ; EN = 1
+    NOP
+    BCF     PORTD, 3        ; EN = 0
+    CALL    RETARDO_1MS
+
+    ; Enviar nibble bajo
+    SWAPF   LCD_TEMP, W     
+    ANDLW   0xF0            ; Nibble bajo
+    MOVWF   PORTD
+    BSF     PORTD, 2        ; RS = 1 (Dato)
+    BSF     PORTD, 3        ; EN = 1
+    NOP
+    BCF     PORTD, 3        ; EN = 0
+    CALL    RETARDO_1MS
+    RETURN
+
+; --- Retardos Ajustados para 8 MHz ---
+RETARDO_1MS
+    MOVLW   d'3'            ; 3 iteraciones externas
+    MOVWF   DELAY_CONT2
+L1  MOVLW   d'250'
+    MOVWF   DELAY_CONT1
+L2  DECFSZ  DELAY_CONT1, F
+    GOTO    L2
+    DECFSZ  DELAY_CONT2, F
+    GOTO    L1
+    RETURN
+
+RETARDO_15MS
+    MOVLW   d'40'           ; 40 iteraciones externas
+    MOVWF   DELAY_CONT2
+L3  MOVLW   d'250'
+    MOVWF   DELAY_CONT1
+L4  DECFSZ  DELAY_CONT1, F
+    GOTO    L4
+    DECFSZ  DELAY_CONT2, F
+    GOTO    L3
+    RETURN
+
+    END
+
+11-Pulsometro version 2 con CCP y Timer
+
+; ==============================================================================
+; PROYECTO: PULSÓMETRO DE PRECISIÓN (MODO CAPTURA CCP1)
+; HARDWARE: PIC16F887
+; OSCILADOR: INTOSCIO 8 MHz
+; VERSION CORREGIDA Y OPTIMIZADA
+; ==============================================================================
+
+    #include <p16f887.inc>
+
+    __CONFIG _CONFIG1, _INTRC_OSC_NOCLKOUT & _WDT_OFF & _PWRTE_ON & _MCLRE_ON & _CP_OFF & _CPD_OFF & _BOREN_OFF & _IESO_OFF & _FCMEN_OFF & _LVP_OFF
+    __CONFIG _CONFIG2, _BOR40V & _WRT_OFF
+
+; ==============================================================================
+; VARIABLES
+; ==============================================================================
+    CBLOCK 0x70         ; Memoria Compartida (Protege la interrupción)
+        W_TEMP
+        STATUS_TEMP
+    ENDC
+
+    CBLOCK 0x20         ; Banco 0
+        ESTADO_CAP      ; 0 = Esperando pulso 1, 1 = Esperando pulso 2
+        VUELTAS_TMR1    ; Desbordes del TMR1 (Bits 16-23 del tiempo)
+        TICKS_H         ; Captura Alta
+        TICKS_L         ; Captura Baja
+        FLAG_DATO_LISTO 
+        
+        ; Variables para División de 24 bits Restablecedora
+        NUM_U           ; Numerador (15.000.000) y luego Cociente
+        NUM_H           
+        NUM_L           
+        DEN_U           ; Denominador (Tiempo medido)
+        DEN_H           
+        DEN_L           
+        REM_U           ; Resto/Acumulador temporal
+        REM_H           
+        REM_L           
+        RES_H           ; Resultado final para pasar a BCD
+        RES_L           
+        CONT_DIV        
+        
+        ; Variables BCD y LCD
+        ADC_ALTO
+        ADC_BAJO
+        MILES
+        CENTENA
+        DECENA
+        UNIDAD
+        LCD_TEMP
+        DELAY_CONT1
+        DELAY_CONT2
+    ENDC
+
+; ==============================================================================
+; VECTORES PRINCIPALES
+; ==============================================================================
+    ORG     0x000
+    GOTO    INICIO
+
+    ORG     0x004
+    GOTO    RSI_INTERRUPCION
+
+; ==============================================================================
+; RUTINA DE INTERRUPCIÓN (TMR1 Y CCP1)
+; ==============================================================================
+RSI_INTERRUPCION
+    MOVWF   W_TEMP
+    SWAPF   STATUS, W
+    MOVWF   STATUS_TEMP
+    BCF     STATUS, RP0
+    BCF     STATUS, RP1
+
+    ; --- 1. Desbordamiento de TMR1 ---
+    BTFSS   PIR1, TMR1IF
+    GOTO    CHECK_CCP1
+    BCF     PIR1, TMR1IF
+    INCF    VUELTAS_TMR1, F 
+
+CHECK_CCP1
+    ; --- 2. Captura CCP1 ---
+    BTFSS   PIR1, CCP1IF
+    GOTO    SALIR_RSI
+    BCF     PIR1, CCP1IF
+
+    MOVF    ESTADO_CAP, W
+    BTFSS   STATUS, Z
+    GOTO    SEGUNDO_LATIDO
+
+PRIMER_LATIDO
+    CLRF    TMR1H
+    CLRF    TMR1L
+    CLRF    VUELTAS_TMR1
+    BCF     PIR1, TMR1IF    ; Limpiar por seguridad
+    MOVLW   d'1'
+    MOVWF   ESTADO_CAP
+    GOTO    SALIR_RSI
+
+SEGUNDO_LATIDO
+    MOVF    CCPR1H, W
+    MOVWF   TICKS_H
+    MOVF    CCPR1L, W
+    MOVWF   TICKS_L
+    CLRF    ESTADO_CAP
+    BSF     FLAG_DATO_LISTO, 0
+
+SALIR_RSI
+    SWAPF   STATUS_TEMP, W
+    MOVWF   STATUS
+    SWAPF   W_TEMP, F
+    SWAPF   W_TEMP, W
+    RETFIE
+
+; ==============================================================================
+; INICIALIZACIÓN
+; ==============================================================================
+INICIO
+    BANKSEL OSCCON
+    MOVLW   b'01110001'     ; 8 MHz
+    MOVWF   OSCCON
+    CALL    RETARDO_15MS
+
+    BANKSEL TRISC
+    BSF     TRISC, 2        ; RC2 como entrada
+    BANKSEL TRISD
+    CLRF    TRISD           ; PORTD salida
+    BANKSEL ANSEL
+    CLRF    ANSEL
+    CLRF    ANSELH
+
+    BANKSEL T1CON
+    MOVLW   b'00110001'     ; Pre-escalador 1:8, Osc Interno, TMR1 ON
+    MOVWF   T1CON
+
+    BANKSEL CCP1CON
+    MOVLW   b'00000101'     ; Modo Captura (Flanco Subida)
+    MOVWF   CCP1CON
+
+    BANKSEL ESTADO_CAP
+    CLRF    ESTADO_CAP
+    CLRF    FLAG_DATO_LISTO
+
+    CALL    LCD_INICIA
+
+    BANKSEL PIE1
+    BSF     PIE1, CCP1IE
+    BSF     PIE1, TMR1IE
+    BANKSEL INTCON
+    BSF     INTCON, PEIE
+    BSF     INTCON, GIE
+
+; ==============================================================================
+; BUCLE PRINCIPAL
+; ==============================================================================
+BUCLE_PRINCIPAL
+    BTFSS   FLAG_DATO_LISTO, 0
+    GOTO    BUCLE_PRINCIPAL
+
+    BCF     FLAG_DATO_LISTO, 0
+
+    ; --- Cargar Numerador (15.000.000 = 0xE4E1C0) ---
+    MOVLW   0xE4
+    MOVWF   NUM_U
+    MOVLW   0xE1
+    MOVWF   NUM_H
+    MOVLW   0xC0
+    MOVWF   NUM_L
+
+    ; --- Cargar Denominador (Tiempo medido) ---
+    MOVF    VUELTAS_TMR1, W
+    MOVWF   DEN_U
+    MOVF    TICKS_H, W
+    MOVWF   DEN_H
+    MOVF    TICKS_L, W
+    MOVWF   DEN_L
+
+    CALL    DIV_24BIT
+
+    ; Pasamos el cociente para convertirlo a texto
+    MOVF    RES_H, W
+    MOVWF   ADC_ALTO
+    MOVF    RES_L, W
+    MOVWF   ADC_BAJO
+    CALL    DIVIDIR_BCD_16BITS
+
+    ; --- Imprimir en Pantalla ---
+    MOVLW   0x80
+    CALL    LCD_COMANDO
+    
+    MOVF    MILES, W
+    ADDLW   '0'
+    CALL    LCD_CARACTER
+    MOVF    CENTENA, W
+    ADDLW   '0'
+    CALL    LCD_CARACTER
+    MOVF    DECENA, W
+    ADDLW   '0'
+    CALL    LCD_CARACTER
+    MOVF    UNIDAD, W
+    ADDLW   '0'
+    CALL    LCD_CARACTER
+
+    MOVLW   ' '
+    CALL    LCD_CARACTER
+    MOVLW   'P'
+    CALL    LCD_CARACTER
+    MOVLW   'P'
+    CALL    LCD_CARACTER
+    MOVLW   'M'
+    CALL    LCD_CARACTER
+
+    GOTO    BUCLE_PRINCIPAL
+
+; ==============================================================================
+; DIVISIÓN DE 24 BITS RESTABLECEDORA (Segura)
+; ==============================================================================
+DIV_24BIT
+    CLRF    REM_U
+    CLRF    REM_H
+    CLRF    REM_L
+    MOVLW   d'24'
+    MOVWF   CONT_DIV
+    
+DIV_LOOP
+    ; 1. Shift Left a NUM y Acumulador (REM)
+    BCF     STATUS, C
+    RLF     NUM_L, F
+    RLF     NUM_H, F
+    RLF     NUM_U, F
+    RLF     REM_L, F
+    RLF     REM_H, F
+    RLF     REM_U, F
+
+    ; 2. Restar Denominador de Acumulador (Macro segura)
+    MOVF    DEN_L, W
+    SUBWF   REM_L, F
+    MOVF    DEN_H, W
+    BTFSS   STATUS, C
+    INCFSZ  DEN_H, W
+    GOTO    DIV_SUB_H
+    SUBWF   REM_H, F
+    BCF     STATUS, C
+    GOTO    DIV_SUB_U
+DIV_SUB_H
+    SUBWF   REM_H, F
+DIV_SUB_U
+    MOVF    DEN_U, W
+    BTFSS   STATUS, C
+    INCFSZ  DEN_U, W
+    GOTO    DIV_SUB_U_EXEC
+    SUBWF   REM_U, F
+    BCF     STATUS, C
+    GOTO    DIV_CHECK
+DIV_SUB_U_EXEC
+    SUBWF   REM_U, F
+
+DIV_CHECK
+    ; 3. Si hubo Préstamo (C=0), restauramos
+    BTFSS   STATUS, C
+    GOTO    DIV_RESTORE
+    
+    ; Si no hubo préstamo (C=1), cociente recibe un 1
+    BSF     NUM_L, 0
+    GOTO    DIV_NEXT
+
+DIV_RESTORE
+    ; Sumar Denominador devuelta al Acumulador
+    MOVF    DEN_L, W
+    ADDWF   REM_L, F
+    MOVF    DEN_H, W
+    BTFSC   STATUS, C
+    INCFSZ  DEN_H, W
+    GOTO    DIV_ADD_H
+    ADDWF   REM_H, F
+    BSF     STATUS, C
+    GOTO    DIV_ADD_U
+DIV_ADD_H
+    ADDWF   REM_H, F
+DIV_ADD_U
+    MOVF    DEN_U, W
+    BTFSC   STATUS, C
+    INCFSZ  DEN_U, W
+    GOTO    DIV_ADD_U_EXEC
+    ADDWF   REM_U, F
+    GOTO    DIV_NEXT
+DIV_ADD_U_EXEC
+    ADDWF   REM_U, F
+
+DIV_NEXT
+    DECFSZ  CONT_DIV, F
+    GOTO    DIV_LOOP
+
+    ; Extraer 16 bits del resultado
+    MOVF    NUM_H, W
+    MOVWF   RES_H
+    MOVF    NUM_L, W
+    MOVWF   RES_L
+    RETURN
+
+; ==============================================================================
+; RUTINA MATEMÁTICA BCD
+; ==============================================================================
+DIVIDIR_BCD_16BITS
+    CLRF    MILES
+    CLRF    CENTENA
+    CLRF    DECENA
+MILES_LOOP
+    MOVF    ADC_ALTO, W
+    SUBLW   0x03
+    BTFSS   STATUS, C
+    GOTO    RESTAR_MIL
+    MOVF    ADC_ALTO, W
+    XORLW   0x03
+    BTFSS   STATUS, Z
+    GOTO    CENTENAS
+    MOVLW   0xE8
+    SUBWF   ADC_BAJO, W
+    BTFSS   STATUS, C
+    GOTO    CENTENAS
+RESTAR_MIL
+    MOVLW   0xE8
+    SUBWF   ADC_BAJO, F
+    BTFSS   STATUS, C
+    DECF    ADC_ALTO, F
+    MOVLW   0x03
+    SUBWF   ADC_ALTO, F
+    INCF    MILES, F
+    GOTO    MILES_LOOP
+CENTENAS
+    MOVF    ADC_ALTO, W
+    BTFSS   STATUS, Z
+    GOTO    RESTAR_CENT
+    MOVLW   .100
+    SUBWF   ADC_BAJO, W
+    BTFSS   STATUS, C
+    GOTO    DECENAS
+RESTAR_CENT
+    MOVLW   .100
+    SUBWF   ADC_BAJO, F
+    BTFSS   STATUS, C
+    DECF    ADC_ALTO, F
+    INCF    CENTENA, F
+    GOTO    CENTENAS
+DECENAS
+    MOVF    ADC_ALTO, W
+    BTFSS   STATUS, Z
+    GOTO    RESTAR_DEC
+    MOVLW   .10
+    SUBWF   ADC_BAJO, W
+    BTFSS   STATUS, C
+    GOTO    FIN_BCD
+RESTAR_DEC
+    MOVLW   .10
+    SUBWF   ADC_BAJO, F
+    BTFSS   STATUS, C
+    DECF    ADC_ALTO, F
+    INCF    DECENA, F
+    GOTO    DECENAS
+FIN_BCD
+    MOVF    ADC_BAJO, W
+    MOVWF   UNIDAD
+    RETURN
+
+; ==============================================================================
+; LCD (4 BITS) CORREGIDO
+; ==============================================================================
+LCD_INICIA
+    CALL    RETARDO_15MS
+    MOVLW   0x02            ; Reset
+    CALL    LCD_COMANDO
+    MOVLW   0x28            ; Modo 4 bits, 2 Lineas
+    CALL    LCD_COMANDO
+    MOVLW   0x0C            ; Display On
+    CALL    LCD_COMANDO
+    MOVLW   0x01            ; Clear
+    CALL    LCD_COMANDO
+    CALL    RETARDO_15MS
+    RETURN
+
+LCD_COMANDO
+    MOVWF   LCD_TEMP
+    MOVF    LCD_TEMP, W     ; --- AHORA SI: Nibble Alto primero ---
+    ANDLW   0xF0
+    MOVWF   PORTD
+    BCF     PORTD, 2        ; RS=0
+    BSF     PORTD, 3        ; E=1
+    NOP
+    BCF     PORTD, 3        ; E=0
+    CALL    RETARDO_1MS
+    
+    SWAPF   LCD_TEMP, W     ; --- Luego Nibble Bajo ---
+    ANDLW   0xF0
+    MOVWF   PORTD
+    BCF     PORTD, 2
+    BSF     PORTD, 3
+    NOP
+    BCF     PORTD, 3
+    CALL    RETARDO_1MS
+    RETURN
+
+LCD_CARACTER
+    MOVWF   LCD_TEMP
+    MOVF    LCD_TEMP, W     
+    ANDLW   0xF0
+    MOVWF   PORTD
+    BSF     PORTD, 2        ; RS=1
+    BSF     PORTD, 3
+    NOP
+    BCF     PORTD, 3
+    CALL    RETARDO_1MS
+    
+    SWAPF   LCD_TEMP, W     
+    ANDLW   0xF0
+    MOVWF   PORTD
+    BSF     PORTD, 2
+    BSF     PORTD, 3
+    NOP
+    BCF     PORTD, 3
+    CALL    RETARDO_1MS
+    RETURN
+
+RETARDO_1MS
+    MOVLW   d'3'
+    MOVWF   DELAY_CONT2
+L_MS1
+    MOVLW   d'250'
+    MOVWF   DELAY_CONT1
+L_MS2
+    DECFSZ  DELAY_CONT1, F
+    GOTO    L_MS2
+    DECFSZ  DELAY_CONT2, F
+    GOTO    L_MS1
+    RETURN
+
+RETARDO_15MS
+    MOVLW   d'40'
+    MOVWF   DELAY_CONT2
+L_15MS1
+    MOVLW   d'250'
+    MOVWF   DELAY_CONT1
+L_15MS2
+    DECFSZ  DELAY_CONT1, F
+    GOTO    L_15MS2
+    DECFSZ  DELAY_CONT2, F
+    GOTO    L_15MS1
+    RETURN
+
+    END
+
+12-UART con ADC
+
+;************************************************************************
+; Proyecto:    Lectura ADC y Transmisión UART
+; Dispositivo: PIC16F887
+; Oscilador:   8 MHz, INTOSC (OSCIO)
+; Compilador:  MPASM
+; Fecha:       [Fecha actual]
+; Descripción: Lee el valor del canal AN0 (10 bits) y lo transmite por UART
+;              a 9600 baudios en formato decimal, con CR+LF.
+;************************************************************************
+; ========================================================================
+; NOTA DE SIMULACIÓN Y PUERTOS COM VIRTUALES:
+; Para simular la transmisión UART de este PIC en Proteus y graficar
+; los datos en el Serial Plotter del IDE de Arduino, se requiere un 
+; emulador de puertos nulo (Null Modem).
+;
+; IMPORTANTE: Se ha comprobado que alternativas como com0com o Free VSP 
+; pueden generar conflictos de permisos o el error rojo en el componente 
+; COMPIM debido a las políticas de Windows.
+; 
+; SOLUCIÓN VERIFICADA: Utilizar "Virtual Serial Port Driver PRO" 
+; (Eltima / Electronic Team). Crear un puente directo (ej. COM1 <-> COM2)
+; con este software garantiza una emulación de hardware estricta, 
+; eliminando los errores de acceso y permitiendo un flujo de datos limpio.
+; ========================================================================
+    list p=16f887               ; Definir el procesador
+    #include <p16f887.inc>      ; Archivo de definiciones del PIC
+
+;************************************************************************
+; CONFIGURACIÓN DE LOS BITS DE CONFIGURACIÓN (Configuration Bits)
+; Basado en los requisitos: INTRC_OSC_NOCLKOUT, MCLRE ON, WDT OFF
+;************************************************************************
+    __CONFIG _CONFIG1, _INTRC_OSC_NOCLKOUT & _WDT_OFF & _PWRTE_OFF & _MCLRE_ON & _CP_OFF & _CPD_OFF & _BOR_OFF & _IESO_OFF & _FCMEN_OFF & _LVP_OFF
+    __CONFIG _CONFIG2, _WRT_OFF & _BOR21V
+
+;************************************************************************
+; ASIGNACIÓN DE VARIABLES EN MEMORIA RAM
+;************************************************************************
+   cblock  0x70                ; Inicio de la memoria RAM
+        ADCVAL:2                ; Variable de 2 bytes para el valor ADC (10 bits)
+        TEMP                    ; Variable temporal
+        CONTADOR                ; Variable de uso general
+        
+        ; --- VARIABLES PARA CONVERSIÓN A DECIMAL ---
+        MILLARES
+        CENTENAS
+        DECENAS
+        TEMP_H
+        TEMP_L
+    endc
+
+;************************************************************************
+; VECTOR DE RESET
+;************************************************************************
+    org     0x00                ; Vector de reset
+    goto    INICIO
+
+;************************************************************************
+; VECTOR DE INTERRUPCIÓN (no utilizado, pero se incluye por completitud)
+;************************************************************************
+    org     0x04
+    retfie
+
+;************************************************************************
+; INICIALIZACIÓN DEL PROGRAMA PRINCIPAL
+;************************************************************************
+INICIO:
+    ;--------------------------------------------------------
+    ; Configuración del oscilador interno a 8 MHz
+    ;--------------------------------------------------------
+    banksel OSCCON
+    movlw   b'01110000'         ; IRCF = 111 (8 MHz), SCS = 0
+    movwf   OSCCON
+
+    ;--------------------------------------------------------
+    ; Configuración de puertos
+    ;--------------------------------------------------------
+    banksel ANSEL
+    clrf    ANSEL               ; ANSEL: Configurar todos como digital (luego ajustamos)
+    clrf    ANSELH
+
+    ; Configurar AN0 como analógico, el resto digitales
+    movlw   b'00000001'         ; Solo AN0 (RA0) como analógico
+    movwf   ANSEL
+    clrf    ANSELH              ; ANSELH todo digital (AN8-AN13)
+
+    ; Configurar TRIS para entradas/salidas
+    banksel TRISA
+    bsf     TRISA, 0            ; RA0 como entrada (AN0)
+    
+    ; Configurar UART: TX en RC6 (salida), RX en RC7 (entrada, no usado)
+    banksel TRISC
+    bcf     TRISC, 6            ; RC6 como salida (TX)
+    bsf     TRISC, 7            ; RC7 como entrada (RX)
+
+    ;--------------------------------------------------------
+    ; Configuración del módulo ADC
+    ;--------------------------------------------------------
+    banksel ADCON0
+    movlw   b'00000001'         ; ADCON0: Canal 0, ADC encendido, Fosc/2
+    movwf   ADCON0
+
+    banksel ADCON1
+    movlw   b'10000000'         ; ADCON1: Resultado justificado a la derecha (10 bits en ADRESH:ADRESL), VDD/VSS como referencias
+    movwf   ADCON1
+
+    ;--------------------------------------------------------
+    ; Configuración del módulo UART a 9600 baudios (con Fosc = 8 MHz)
+    ;--------------------------------------------------------
+    ; Cálculo del valor para SPBRG:
+    ; Deseado: 9600 baudios
+    ; Fosc = 8 MHz, modo BRGH = 1 (alta velocidad)
+    ; SPBRG = (Fosc/(16*Baudios)) - 1 = (8000000/(16*9600)) - 1 = 51.08 ˜ 51 (0x33)
+    ; Error = 0.16% (aceptable)
+
+    banksel TXSTA
+    movlw   b'00100100'         ; TXSTA: BRGH=1 (alta velocidad), TXEN=1 (transmisión habilitada), modo asíncrono (SYNC=0)
+    movwf   TXSTA
+
+    banksel SPBRG
+    movlw   .51                 ; 0x33 - Valor para 9600 baudios a 8 MHz
+    movwf   SPBRG
+
+    banksel RCSTA
+    movlw   b'10000000'         ; RCSTA: SPEN=1 (puerto serie habilitado)
+    movwf   RCSTA
+
+;************************************************************************
+; BUCLE PRINCIPAL
+;************************************************************************
+MAIN_LOOP:
+    ;--------------------------------------------------------
+    ; 1. Leer el ADC del canal 0 (AN0)
+    ;--------------------------------------------------------
+    ; Seleccionar canal 0
+    banksel ADCON0
+    bcf     ADCON0, CHS0
+    bcf     ADCON0, CHS1
+    bcf     ADCON0, CHS2
+    bcf     ADCON0, CHS3
+    
+    ; Iniciar conversión
+    bsf     ADCON0, GO
+    
+    ; Esperar a que termine la conversión
+ADC_ESPERA:
+    btfsc   ADCON0, GO
+    goto    ADC_ESPERA
+    
+    ; Leer el resultado (10 bits, justificado a la derecha)
+    banksel ADRESL
+    movf    ADRESL, w
+    movwf   ADCVAL
+    banksel ADRESH
+    movf    ADRESH, w
+    movwf   ADCVAL+1
+
+    ;--------------------------------------------------------
+    ; 2. Transmitir el valor ADC por UART (Formato Plotter)
+    ;--------------------------------------------------------
+    ; Llamamos a la subrutina que convierte los 10 bits a decimal 
+    ; y los transmite inmediatamente por el puerto serie.
+    call    ENVIAR_DECIMAL_UART
+    
+    ; Transmitir CR+LF (Retorno de carro y Salto de línea)
+    ; Esto es OBLIGATORIO para que el Serial Plotter sepa que el dato terminó
+    movlw   0x0D                ; Carriage Return (\r)
+    call    TX_UART
+    movlw   0x0A                ; Line Feed (\n)
+    call    TX_UART
+
+    ;--------------------------------------------------------
+    ; 3. Pequeña pausa antes de la siguiente lectura
+    ;--------------------------------------------------------
+    ; Aproximadamente 100 ms con un bucle simple
+    ; Ajustar según necesidades
+    movlw   .100
+    call    RETARDO_MS
+
+    goto    MAIN_LOOP
+
+;************************************************************************
+; SUBRUTINAS
+;************************************************************************
+
+;--------------------------------------------------------
+; SUBRUTINA: TX_UART (versión corregida con TRMT)
+; Transmite un carácter por UART esperando a que el buffer esté vacío
+; Entrada: W = carácter a transmitir
+;--------------------------------------------------------
+TX_UART:
+    banksel TXSTA
+    btfss   TXSTA, TRMT          ; Espera hasta que el registro de desplazamiento esté vacío
+    goto    $-1
+    banksel TXREG
+    movwf   TXREG
+    return
+
+;--------------------------------------------------------
+; SUBRUTINA: ENVIAR_DECIMAL_UART
+; Convierte ADCVAL (10 bits) a ASCII Decimal y lo transmite
+;--------------------------------------------------------
+ENVIAR_DECIMAL_UART:
+    ; Copiar ADCVAL a temporales para no destruir el dato original
+    movf    ADCVAL, W
+    movwf   TEMP_L
+    movf    ADCVAL+1, W
+    movwf   TEMP_H
+
+    clrf    MILLARES
+    clrf    CENTENAS
+    clrf    DECENAS
+
+R_MIL:
+    ; Restar 1000 (0x03E8)
+    movlw   0x03
+    subwf   TEMP_H, W
+    btfss   STATUS, C
+    goto    R_CEN           ; Si TEMP_H < 3, ya es menor a 1000
+    btfss   STATUS, Z
+    goto    Es_Mayor_Mil    ; Si TEMP_H > 3, es mayor seguro
+    ; Si TEMP_H == 3, comprobar la parte baja
+    movlw   0xE8
+    subwf   TEMP_L, W
+    btfss   STATUS, C
+    goto    R_CEN           ; Si no alcanza para restar E8, es menor a 1000
+
+Es_Mayor_Mil:
+    movlw   0xE8
+    subwf   TEMP_L, F       ; Restar E8 a la parte baja
+    btfss   STATUS, C       ; Si hubo préstamo (borrow)
+    decf    TEMP_H, F       ; Descontar 1 de la parte alta
+    movlw   0x03
+    subwf   TEMP_H, F       ; Restar 03 a la parte alta
+    incf    MILLARES, F     ; Sumar 1 a la cuenta de miles
+    goto    R_MIL
+
+R_CEN:
+    ; Restar 100 (0x64)
+    movlw   .100
+    subwf   TEMP_L, F
+    btfsc   STATUS, C
+    goto    Cen_No_Borrow
+    ; Si hubo borrow, verificar parte alta
+    movf    TEMP_H, W
+    btfsc   STATUS, Z
+    goto    Cen_Underflow   ; Si era 0, nos pasamos restando
+    decf    TEMP_H, F       ; Tomar prestado de la parte alta
+Cen_No_Borrow:
+    incf    CENTENAS, F
+    goto    R_CEN
+
+Cen_Underflow:
+    movlw   .100            ; Sumar 100 de vuelta porque nos pasamos
+    addwf   TEMP_L, F
+
+R_DEC:
+    ; Restar 10
+    movlw   .10
+    subwf   TEMP_L, F
+    btfss   STATUS, C
+    goto    Dec_Underflow   ; Si nos pasamos
+    incf    DECENAS, F
+    goto    R_DEC
+
+Dec_Underflow:
+    movlw   .10             ; Sumar 10 de vuelta
+    addwf   TEMP_L, F       ; TEMP_L ahora contiene las Unidades
+
+    ; --- TRANSMISIÓN DE LOS DÍGITOS ---
+    ; Enviar Millares (solo si es mayor a 0, evita ver "0512")
+    movf    MILLARES, W
+    btfsc   STATUS, Z
+    goto    Enviar_Cen
+    addlw   0x30            ; Sumar 0x30 para convertir a texto ASCII
+    call    TX_UART
+
+Enviar_Cen:
+    movf    CENTENAS, W
+    addlw   0x30
+    call    TX_UART
+
+Enviar_Dec:
+    movf    DECENAS, W
+    addlw   0x30
+    call    TX_UART
+
+Enviar_Uni:
+    movf    TEMP_L, W
+    addlw   0x30
+    call    TX_UART
+
+    return
+
+;--------------------------------------------------------
+; SUBRUTINA: RETARDO_MS
+; Genera un retardo aproximado de W milisegundos
+; Entrada: W = milisegundos (máximo 255)
+; NOTA: Valores aproximados con oscilador de 8 MHz
+;--------------------------------------------------------
+RETARDO_MS:
+    movwf   CONTADOR
+R_MS_EXT:
+    movlw   .200                ; Valor ajustado para ~1ms a 8MHz
+    movwf   TEMP
+R_MS_INT:
+    decfsz  TEMP, f
+    goto    R_MS_INT
+    decfsz  CONTADOR, f
+    goto    R_MS_EXT
+    return
+
+;************************************************************************
+; FIN DEL PROGRAMA
+;************************************************************************
+    end
+
+13-DS18B20
+
+list p=16f887
+    #include <p16f887.inc>
+
+    __CONFIG _CONFIG1, _LVP_OFF & _FCMEN_OFF & _IESO_OFF & _BOR_OFF & _CPD_OFF & _CP_OFF & _MCLRE_ON & _PWRTE_ON & _WDT_OFF & _INTRC_OSC_NOCLKOUT
+    __CONFIG _CONFIG2, _WRT_OFF & _BOR21V
+
+    errorlevel -302
+
+    ; --- Variables ---
+    cblock 0x20
+        d1, d2, d3          ; Variables retardos y LCD
+        ow_byte             ; Byte de 1-Wire
+        ow_bit_count
+        temp_LSB            ; Temperatura cruda
+        temp_MSB
+        temp_int            ; Temperatura entera calculada
+        centenas            ; Variables BCD para el LCD
+        decenas
+        unidades
+    endc
+
+    #define OW_PIN PORTB, 0
+    #define OW_TRIS TRISB, 0
+    #define LCD_RS 2        ; PORTD, 2
+    #define LCD_EN 3        ; PORTD, 3
+
+    org 0x0000
+    goto Main
+
+Main:
+    ; 1. Oscilador 8MHz
+    banksel OSCCON
+    movlw b'01110001'
+    movwf OSCCON
+
+    ; 2. Puertos Digitales
+    banksel ANSEL
+    clrf ANSEL
+    clrf ANSELH
+
+    ; 3. Configurar Pin 1-Wire (RB0)
+    banksel PORTB
+    bcf OW_PIN
+    banksel TRISB
+    bsf OW_TRIS
+
+    ; 4. Configurar PORTD para el LCD
+    banksel TRISD
+    clrf TRISD          ; Todo PORTD como salida
+    banksel PORTD
+    clrf PORTD
+
+    ; 5. Inicializar el LCD
+    call Delay_15ms     ; Esperar estabilización del LCD
+    call LCD_Init
+
+    ; Mensaje inicial estático: "Temp: "
+    movlw 'T'
+    call LCD_Char
+    movlw 'e'
+    call LCD_Char
+    movlw 'm'
+    call LCD_Char
+    movlw 'p'
+    call LCD_Char
+    movlw ':'
+    call LCD_Char
+    movlw ' '
+    call LCD_Char
+
+Loop_Principal:
+    ; --- Iniciar Conversión ---
+    call OW_Reset
+    movlw 0xCC          ; Skip ROM
+    call OW_Write_Byte
+    movlw 0x44          ; Convert T
+    call OW_Write_Byte
+
+    call Delay_750ms
+
+    ; --- Leer Temperatura ---
+    call OW_Reset
+    movlw 0xCC
+    call OW_Write_Byte
+    movlw 0xBE          ; Read Scratchpad
+    call OW_Write_Byte
+
+    call OW_Read_Byte
+    movf ow_byte, W
+    movwf temp_LSB
+
+    call OW_Read_Byte
+    movf ow_byte, W
+    movwf temp_MSB
+    call OW_Reset
+
+    ; --- Extraer parte entera (Positiva) ---
+    ; LSB: FFFF LLLL -> LLLL 0000 (en temp_int)
+    swapf temp_LSB, W
+    andlw 0x0F
+    movwf temp_int
+    
+    ; MSB: SSSS HHHH -> HHHH 0000 -> combinamos
+    swapf temp_MSB, W
+    andlw 0xF0
+    iorwf temp_int, F   ; temp_int ahora tiene el valor en grados 0-125
+
+    ; --- Convertir Binario a BCD ---
+    call Bin_a_BCD
+
+    ; --- Mostrar en LCD ---
+    ; Posicionar cursor luego de "Temp: " (Fila 1, Columna 7 = 0x86)
+    movlw 0x86
+    call LCD_Cmd
+
+    ; Mostrar Centenas (evitando cero a la izquierda si es < 100)
+    movf centenas, W
+    btfsc STATUS, Z
+    goto Mostrar_Decenas
+    addlw 0x30          ; Convertir a ASCII
+    call LCD_Char
+
+Mostrar_Decenas:
+    movf decenas, W
+    addlw 0x30
+    call LCD_Char
+
+Mostrar_Unidades:
+    movf unidades, W
+    addlw 0x30
+    call LCD_Char
+
+    ; Mostrar símbolo de grados y 'C'
+    movlw 0xDF          ; Símbolo de grado '°' en LM016L
+    call LCD_Char
+    movlw 'C'
+    call LCD_Char
+    movlw ' '           ; Limpiar caracter extra por si baja de 100 a 99
+    call LCD_Char
+
+    goto Loop_Principal
+
+
+; ==============================================================================
+; RUTINAS LCD (Modo 4 bits en PORTD)
+; ==============================================================================
+LCD_Init:
+    ; Secuencia de inicio a 4 bits
+    movlw 0x02          ; Retorno a casa (Modo 4 bits)
+    call LCD_Cmd
+    movlw 0x28          ; 4 bits, 2 líneas, fuente 5x7
+    call LCD_Cmd
+    movlw 0x0C          ; Display ON, Cursor OFF
+    call LCD_Cmd
+    movlw 0x06          ; Incremento automático
+    call LCD_Cmd
+    movlw 0x01          ; Limpiar pantalla
+    call LCD_Cmd
+    return
+
+LCD_Cmd:
+    bcf PORTD, LCD_RS   ; RS = 0 (Comando)
+    goto LCD_Write
+LCD_Char:
+    bsf PORTD, LCD_RS   ; RS = 1 (Dato)
+LCD_Write:
+    movwf d2            ; Guarda el byte original
+    
+    ; Enviar Nibble Alto
+    movf PORTD, W
+    andlw 0x0F          ; Mantiene RS y EN intactos
+    movwf d3
+    movf d2, W
+    andlw 0xF0          ; Toma el nibble alto del dato
+    iorwf d3, W         ; Combina
+    movwf PORTD
+    call LCD_Pulse
+    
+    ; Enviar Nibble Bajo
+    movf PORTD, W
+    andlw 0x0F
+    movwf d3
+    swapf d2, W         ; Mueve el nibble bajo a la posición alta
+    andlw 0xF0
+    iorwf d3, W
+    movwf PORTD
+    call LCD_Pulse
+    
+    call Delay_5ms      ; Retardo necesario para que el LCD procese
+    return
+
+LCD_Pulse:
+    bsf PORTD, LCD_EN
+    nop
+    bcf PORTD, LCD_EN
+    return
+
+; ==============================================================================
+; CONVERSIÓN BINARIO A BCD (Resta sucesiva)
+; ==============================================================================
+Bin_a_BCD:
+    clrf centenas
+    clrf decenas
+    movf temp_int, W
+    movwf unidades
+Resta_100:
+    movlw d'100'
+    subwf unidades, W
+    btfss STATUS, C     ; Si el resultado es negativo (Carry=0), salta
+    goto Resta_10
+    movwf unidades      ; Si fue positivo, actualiza unidades
+    incf centenas, F    ; Suma 1 a centenas
+    goto Resta_100
+Resta_10:
+    movlw d'10'
+    subwf unidades, W
+    btfss STATUS, C
+    return              ; Termina si es menor a 10
+    movwf unidades
+    incf decenas, F
+    goto Resta_10
+
+
+; ==============================================================================
+; RUTINAS 1-WIRE (Conservadas de la respuesta anterior)
+; ==============================================================================
+OW_Reset:
+    banksel TRISB
+    bcf OW_TRIS
+    call Delay_480us
+    bsf OW_TRIS
+    call Delay_60us
+    call Delay_480us
+    banksel PORTB
+    return
+
+OW_Write_Byte:
+    movwf ow_byte
+    movlw d'8'
+    movwf ow_bit_count
+ow_write_loop:
+    rrf ow_byte, F
+    btfsc STATUS, C
+    goto write_1
+write_0:
+    banksel TRISB
+    bcf OW_TRIS
+    call Delay_60us
+    bsf OW_TRIS
+    call Delay_5us
+    goto write_next
+write_1:
+    banksel TRISB
+    bcf OW_TRIS
+    call Delay_5us
+    bsf OW_TRIS
+    call Delay_60us
+write_next:
+    banksel PORTB
+    decfsz ow_bit_count, F
+    goto ow_write_loop
+    return
+
+OW_Read_Byte:
+    clrf ow_byte
+    movlw d'8'
+    movwf ow_bit_count
+ow_read_loop:
+    rrf ow_byte, F
+    bcf ow_byte, 7
+    banksel TRISB
+    bcf OW_TRIS
+    nop
+    nop
+    bsf OW_TRIS
+    call Delay_10us
+    banksel PORTB
+    btfsc OW_PIN
+    bsf ow_byte, 7
+    call Delay_60us
+    decfsz ow_bit_count, F
+    goto ow_read_loop
+    return
+
+; ==============================================================================
+; RUTINAS DE RETARDO (8MHz)
+; ==============================================================================
+Delay_5us:
+    movlw d'3'
+    movwf d1
+    goto d_loop
+Delay_10us:
+    movlw d'6'
+    movwf d1
+    goto d_loop
+Delay_60us:
+    movlw d'40'
+    movwf d1
+d_loop:
+    decfsz d1, F
+    goto d_loop
+    return
+
+Delay_480us:
+    movlw d'8'
+    movwf d3
+d480_loop:
+    call Delay_60us
+    decfsz d3, F
+    goto d480_loop
+    return
+
+Delay_1ms:              
+    movlw d'2'
+    movwf d3
+d1ms_loop:
+    movlw d'249'
+    movwf d1
+d1ms_inner:
+    nop
+    decfsz d1, F
+    goto d1ms_inner
+    decfsz d3, F
+    goto d1ms_loop
+    return
+
+Delay_5ms:
+    movlw d'5'
+    movwf d2
+    goto dXms_loop
+Delay_15ms:
+    movlw d'15'
+    movwf d2
+dXms_loop:
+    call Delay_1ms
+    decfsz d2, F
+    goto dXms_loop
+    return
+
+Delay_750ms:
+    movlw d'250'
+    movwf d2
+d750_loop1:
+    call Delay_1ms
+    call Delay_1ms
+    call Delay_1ms
+    decfsz d2, F
+    goto d750_loop1
+    return
+
+    end
+
+14-HC-SR04 dos modos
+
+LIST P=16F887
+    #INCLUDE <P16F887.INC>
+
+    ; --- Bits de Configuración ---
+    __CONFIG _CONFIG1, _INTRC_OSC_NOCLKOUT & _WDT_OFF & _PWRTE_ON & _MCLRE_ON & _CP_OFF & _CPD_OFF & _BOREN_OFF & _IESO_OFF & _FCMEN_OFF & _LVP_OFF
+    __CONFIG _CONFIG2, _BOR40V & _WRT_OFF
+
+    ; --- Definición de Pines ---
+    #DEFINE TRIG   PORTB, 1    ; Pin de disparo del HC-SR04
+    #DEFINE ECHO   PORTC, 2    ; Pin de lectura (CCP1)
+    #DEFINE LCD_RS PORTE, 0
+    #DEFINE LCD_RW PORTE, 1
+    #DEFINE LCD_E  PORTE, 2
+
+    ; --- Variables (RAM) ---
+    CBLOCK 0x20
+        W_TEMP, STATUS_TEMP    ; Guardado de contexto
+        CAPT1_L, CAPT1_H       ; Captura de flanco de subida
+        CAPT2_L, CAPT2_H       ; Captura de flanco de bajada
+        PULSE_L, PULSE_H       ; Ancho del pulso calculado (CAPT2 - CAPT1)
+        FLAG_READY             ; Bandera de lectura completa
+        QUOTIENT_L, QUOTIENT_H ; Resultado de la división (Distancia en cm)
+        DIST_L, DIST_H         ; Copia para conversión a BCD
+        HUNDREDS, TENS, UNITS  ; Dígitos BCD para el LCD
+        DLY1, DLY2, DLY3       ; Variables para retardos
+    ENDC
+
+    ; --- Vector de Reset ---
+    ORG 0x00
+    GOTO INICIO
+
+    ; --- Vector de Interrupción ---
+    ORG 0x04
+ISR:
+    MOVWF W_TEMP
+    SWAPF STATUS, W
+    MOVWF STATUS_TEMP
+
+    ; Verificar si la interrupción fue por CCP1
+    BANKSEL PIR1
+    BTFSS PIR1, CCP1IF
+    GOTO EXIT_ISR
+
+    ; Comprobar el modo actual del CCP1 (Bit 0 define el flanco)
+    BANKSEL CCP1CON
+    BTFSS CCP1CON, 0        ; 1 = Subida, 0 = Bajada
+    GOTO FLANCO_BAJADA
+
+FLANCO_SUBIDA:
+    ; Leer el valor capturado por el hardware
+    BANKSEL CCPR1L
+    MOVF CCPR1L, W
+    MOVWF CAPT1_L
+    MOVF CCPR1H, W
+    MOVWF CAPT1_H
+    
+    ; Reconfigurar CCP1 para capturar flanco de bajada (0100)
+    BANKSEL CCP1CON
+    MOVLW b'00000100'
+    MOVWF CCP1CON
+    GOTO END_CCP_INT
+
+FLANCO_BAJADA:
+    ; Leer el segundo valor capturado
+    BANKSEL CCPR1L
+    MOVF CCPR1L, W
+    MOVWF CAPT2_L
+    MOVF CCPR1H, W
+    MOVWF CAPT2_H
+    
+    BSF FLAG_READY, 0       ; Indicar que hay un dato nuevo
+    
+    ; Reconfigurar CCP1 para capturar flanco de subida (0101)
+    BANKSEL CCP1CON
+    MOVLW b'00000101'
+    MOVWF CCP1CON
+
+END_CCP_INT:
+    BANKSEL PIR1
+    BCF PIR1, CCP1IF        ; Limpiar bandera de interrupción CCP1
+
+EXIT_ISR:
+    SWAPF STATUS_TEMP, W
+    MOVWF STATUS
+    SWAPF W_TEMP, F
+    SWAPF W_TEMP, W
+    RETFIE
+
+    ; --- Programa Principal ---
+INICIO:
+    ; 1. Configurar Oscilador Interno a 8 MHz
+    BANKSEL OSCCON
+    MOVLW b'01110001'       
+    MOVWF OSCCON
+
+    ; 2. Configurar Pines Analógicos como Digitales
+    BANKSEL ANSEL
+    CLRF ANSEL              
+    CLRF ANSELH             
+
+    ; 3. Configurar Puertos (TRIS)
+    BANKSEL TRISD
+    CLRF TRISD              ; PORTD salida
+    CLRF TRISE              ; PORTE salida
+    
+    BANKSEL TRISC
+    BSF TRISC, 2            ; RC2/CCP1 como entrada (ECHO)
+    
+    BANKSEL TRISB
+    BCF TRISB, 1            ; RB1 como salida (TRIG)
+
+    ; 4. Configurar Timer1 (Corriendo continuamente)
+    BANKSEL T1CON
+    ; Fosc = 8MHz -> Tcy = 0.5us. Prescaler 1:2 -> 1us por tick
+    MOVLW b'00010001'       ; Pre=1:2, TMR1ON=1
+    MOVWF T1CON
+
+    ; 5. Configurar CCP1 en Modo Captura (Flanco de subida inicial)
+    BANKSEL CCP1CON
+    MOVLW b'00000101'       ; Modo captura, flanco de subida
+    MOVWF CCP1CON
+
+    ; 6. Habilitar Interrupciones
+    BANKSEL PIE1
+    BSF PIE1, CCP1IE        ; Habilitar interrupción de CCP1
+    
+    BANKSEL INTCON
+    BSF INTCON, PEIE        ; Interrupciones periféricas (Necesario para CCP)
+    BSF INTCON, GIE         ; Interrupciones globales
+
+    ; 7. Inicializar LCD y Variables
+    BANKSEL PORTA
+    CLRF PORTD
+    CLRF PORTE
+    CLRF FLAG_READY
+    CALL LCD_INIT
+
+    ; Mensaje inicial
+    MOVLW 'D'
+    CALL LCD_CHAR
+    MOVLW 'i'
+    CALL LCD_CHAR
+    MOVLW 's'
+    CALL LCD_CHAR
+    MOVLW 't'
+    CALL LCD_CHAR
+    MOVLW ':'
+    CALL LCD_CHAR
+    MOVLW ' '
+    CALL LCD_CHAR
+
+MAIN_LOOP:
+    ; Disparo del Trigger (10us)
+    BSF TRIG
+    CALL DELAY_10US
+    BCF TRIG
+
+WAIT_ECHO:
+    BTFSS FLAG_READY, 0
+    GOTO WAIT_ECHO
+    BCF FLAG_READY, 0
+
+    ; --- Resta de 16 Bits: PULSE = CAPT2 - CAPT1 ---
+    MOVF CAPT1_L, W
+    SUBWF CAPT2_L, W
+    MOVWF PULSE_L           ; PULSE_L = CAPT2_L - CAPT1_L
+    
+    MOVF CAPT2_H, W
+    MOVWF PULSE_H
+    BTFSS STATUS, C         ; Comprobar si hubo "borrow" (Acarreo=0)
+    DECF PULSE_H, F         ; Si hubo borrow, restar 1 al MSB de CAPT2
+    
+    MOVF CAPT1_H, W
+    SUBWF PULSE_H, F        ; PULSE_H = (CAPT2_H - borrow) - CAPT1_H
+
+    ; Dividir el pulso entre 58
+    CALL DIV58
+
+    ; Convertir a BCD
+    CALL BIN2BCD
+
+    ; Mostrar en LCD
+    MOVLW 0x86
+    CALL LCD_CMD
+    
+    MOVF HUNDREDS, W
+    ADDLW '0'
+    CALL LCD_CHAR
+    MOVF TENS, W
+    ADDLW '0'
+    CALL LCD_CHAR
+    MOVF UNITS, W
+    ADDLW '0'
+    CALL LCD_CHAR
+    
+    MOVLW 'c'
+    CALL LCD_CHAR
+    MOVLW 'm'
+    CALL LCD_CHAR
+    MOVLW ' '
+    CALL LCD_CHAR
+
+    CALL DELAY_100MS
+    GOTO MAIN_LOOP
+
+    ; --- Rutina de División por Restas Sucesivas (/58) ---
+    ; Nota: Ahora usa PULSE_L y PULSE_H como dividendos directamente
+DIV58:
+    CLRF QUOTIENT_L
+    CLRF QUOTIENT_H
+DIV_LOOP:
+    MOVLW d'58'
+    SUBWF PULSE_L, F
+    BTFSS STATUS, C
+    DECF PULSE_H, F
+    
+    MOVLW 0xFF
+    XORWF PULSE_H, W
+    BTFSC STATUS, Z
+    RETURN
+    
+    INCF QUOTIENT_L, F
+    BTFSC STATUS, Z
+    INCF QUOTIENT_H, F
+    GOTO DIV_LOOP
+
+    ; --- Rutina Binario a BCD ---
+BIN2BCD:
+    CLRF HUNDREDS
+    CLRF TENS
+    CLRF UNITS
+    MOVF QUOTIENT_L, W
+    MOVWF DIST_L
+    MOVF QUOTIENT_H, W
+    MOVWF DIST_H
+CHK_100:
+    MOVLW d'100'
+    SUBWF DIST_L, F
+    BTFSS STATUS, C
+    DECF DIST_H, F
+    MOVLW 0xFF
+    XORWF DIST_H, W
+    BTFSC STATUS, Z
+    GOTO ADD_100
+    INCF HUNDREDS, F
+    GOTO CHK_100
+ADD_100:
+    MOVLW d'100'
+    ADDWF DIST_L, F
+    BTFSC STATUS, C
+    INCF DIST_H, F
+CHK_10:
+    MOVLW d'10'
+    SUBWF DIST_L, F
+    BTFSS STATUS, C
+    GOTO ADD_10
+    INCF TENS, F
+    GOTO CHK_10
+ADD_10:
+    MOVLW d'10'
+    ADDWF DIST_L, F
+    MOVF DIST_L, W
+    MOVWF UNITS
+    RETURN
+
+    ; --- Rutinas de Control del LCD (Idénticas al anterior) ---
+LCD_INIT:
+    CALL DELAY_100MS
+    MOVLW 0x38
+    CALL LCD_CMD
+    MOVLW 0x0C
+    CALL LCD_CMD
+    MOVLW 0x06
+    CALL LCD_CMD
+    MOVLW 0x01
+    CALL LCD_CMD
+    CALL DELAY_100MS
+    RETURN
+
+LCD_CMD:
+    BCF LCD_RS
+    BCF LCD_RW
+    MOVWF PORTD
+    BSF LCD_E
+    NOP
+    BCF LCD_E
+    CALL DELAY_1MS
+    RETURN
+
+LCD_CHAR:
+    BSF LCD_RS
+    BCF LCD_RW
+    MOVWF PORTD
+    BSF LCD_E
+    NOP
+    BCF LCD_E
+    CALL DELAY_1MS
+    RETURN
+
+    ; --- Rutinas de Retardo (Idénticas al anterior) ---
+DELAY_10US:
+    MOVLW d'5'
+    MOVWF DLY1
+DLY10_LOOP:
+    DECFSZ DLY1, F
+    GOTO DLY10_LOOP
+    RETURN
+
+DELAY_1MS:
+    MOVLW d'2'
+    MOVWF DLY2
+DLY1MS_L1:
+    MOVLW d'249'
+    MOVWF DLY1
+DLY1MS_L2:
+    DECFSZ DLY1, F
+    GOTO DLY1MS_L2
+    DECFSZ DLY2, F
+    GOTO DLY1MS_L1
+    RETURN
+
+DELAY_100MS:
+    MOVLW d'100'
+    MOVWF DLY3
+DLY100_LOOP:
+    CALL DELAY_1MS
+    DECFSZ DLY3, F
+    GOTO DLY100_LOOP
+    RETURN
+
+    END
+
+LIST P=16F887
+    #INCLUDE <P16F887.INC>
+
+    ; --- Bits de Configuración ---
+    __CONFIG _CONFIG1, _INTRC_OSC_NOCLKOUT & _WDT_OFF & _PWRTE_ON & _MCLRE_ON & _CP_OFF & _CPD_OFF & _BOREN_OFF & _IESO_OFF & _FCMEN_OFF & _LVP_OFF
+    __CONFIG _CONFIG2, _BOR40V & _WRT_OFF
+
+    ; --- Definición de Pines ---
+    #DEFINE TRIG   PORTB, 1    ; Pin de disparo del HC-SR04
+    #DEFINE ECHO   PORTB, 0    ; Pin de lectura (INT)
+    #DEFINE LCD_RS PORTE, 0
+    #DEFINE LCD_RW PORTE, 1
+    #DEFINE LCD_E  PORTE, 2
+
+    ; --- Variables (RAM) ---
+    CBLOCK 0x20
+        W_TEMP, STATUS_TEMP    ; Guardado de contexto en interrupción
+        TMR1_L, TMR1_H         ; Tiempo capturado (Microsegundos)
+        FLAG_READY             ; Bandera de lectura completa
+        DIVIDEND_L, DIVIDEND_H ; Variables para división
+        QUOTIENT_L, QUOTIENT_H ; Resultado de la división (Distancia en cm)
+        DIST_L, DIST_H         ; Copia para conversión a BCD
+        HUNDREDS, TENS, UNITS  ; Dígitos BCD para el LCD
+        DLY1, DLY2, DLY3       ; Variables para retardos
+    ENDC
+
+    ; --- Vector de Reset ---
+    ORG 0x00
+    GOTO INICIO
+
+    ; --- Vector de Interrupción ---
+    ORG 0x04
+ISR:
+    ; Guardar contexto
+    MOVWF W_TEMP
+    SWAPF STATUS, W
+    MOVWF STATUS_TEMP
+
+    ; Verificar si la interrupción fue por INT (RB0)
+    BTFSS INTCON, INTF
+    GOTO EXIT_ISR
+
+    ; Comprobar qué flanco generó la interrupción
+    BANKSEL OPTION_REG
+    BTFSS OPTION_REG, INTEDG
+    GOTO FLANCO_BAJADA
+
+FLANCO_SUBIDA:
+    ; Inició el pulso de ECHO
+    BANKSEL TMR1H
+    CLRF TMR1H              ; Reiniciar Timer1
+    CLRF TMR1L
+    BSF T1CON, TMR1ON       ; Iniciar Timer1
+    
+    ; Cambiar a detección de flanco de bajada
+    BANKSEL OPTION_REG
+    BCF OPTION_REG, INTEDG
+    GOTO END_INT
+
+FLANCO_BAJADA:
+    ; Terminó el pulso de ECHO
+    BANKSEL T1CON
+    BCF T1CON, TMR1ON       ; Detener Timer1
+    
+    ; Guardar el valor del Timer1
+    MOVF TMR1L, W
+    MOVWF TMR1_L
+    MOVF TMR1H, W
+    MOVWF TMR1_H
+    
+    BSF FLAG_READY, 0       ; Indicar que hay un dato nuevo
+    
+    ; Cambiar a detección de flanco de subida para la próxima
+    BANKSEL OPTION_REG
+    BSF OPTION_REG, INTEDG
+
+END_INT:
+    BANKSEL INTCON
+    BCF INTCON, INTF        ; Limpiar bandera de interrupción INT
+
+EXIT_ISR:
+    ; Restaurar contexto
+    SWAPF STATUS_TEMP, W
+    MOVWF STATUS
+    SWAPF W_TEMP, F
+    SWAPF W_TEMP, W
+    RETFIE
+
+    ; --- Programa Principal ---
+INICIO:
+    ; 1. Configurar Oscilador Interno a 8 MHz
+    BANKSEL OSCCON
+    MOVLW b'01110001'       ; 8 MHz, oscilador interno
+    MOVWF OSCCON
+
+    ; 2. Configurar Pines Analógicos como Digitales
+    BANKSEL ANSEL
+    CLRF ANSEL              ; PORTA y PORTE digitales
+    CLRF ANSELH             ; PORTB digital (Fundamental para RB0)
+
+    ; 3. Configurar Puertos (TRIS)
+    BANKSEL TRISD
+    CLRF TRISD              ; PORTD todo salida (Datos LCD)
+    CLRF TRISE              ; PORTE todo salida (Control LCD)
+    
+    BANKSEL TRISB
+    BSF TRISB, 0            ; RB0 como entrada (ECHO / INT)
+    BCF TRISB, 1            ; RB1 como salida (TRIG)
+
+    ; 4. Configurar Interrupción Externa INT
+    BANKSEL OPTION_REG
+    BCF OPTION_REG, 7       ; Habilitar Pull-ups por si acaso
+    BSF OPTION_REG, INTEDG  ; Iniciar detectando flanco de subida
+
+    ; 5. Configurar Timer1
+    BANKSEL T1CON
+    ; Fosc = 8MHz -> Tcy = 0.5us. Prescaler 1:2 -> Timer1 incrementa cada 1us.
+    MOVLW b'00010000'       
+    MOVWF T1CON
+    
+    ; 6. Habilitar Interrupciones
+    BSF INTCON, INTE        ; Habilitar interrupción INT (RB0)
+    BSF INTCON, PEIE        ; Interrupciones periféricas
+    BSF INTCON, GIE         ; Interrupciones globales
+
+    ; 7. Inicializar LCD y Variables
+    BANKSEL PORTA
+    CLRF PORTD
+    CLRF PORTE
+    CLRF FLAG_READY
+    CALL LCD_INIT
+
+    ; Mensaje inicial estático
+    MOVLW 'D'
+    CALL LCD_CHAR
+    MOVLW 'i'
+    CALL LCD_CHAR
+    MOVLW 's'
+    CALL LCD_CHAR
+    MOVLW 't'
+    CALL LCD_CHAR
+    MOVLW ':'
+    CALL LCD_CHAR
+    MOVLW ' '
+    CALL LCD_CHAR
+
+MAIN_LOOP:
+    ; Enviar pulso de Trigger de 10us
+    BSF TRIG
+    CALL DELAY_10US
+    BCF TRIG
+
+    ; Esperar a que la interrupción complete la lectura
+WAIT_ECHO:
+    BTFSS FLAG_READY, 0
+    GOTO WAIT_ECHO
+    BCF FLAG_READY, 0       ; Limpiar bandera
+
+    ; Cargar tiempo para dividir entre 58 (Distancia en cm)
+    MOVF TMR1_L, W
+    MOVWF DIVIDEND_L
+    MOVF TMR1_H, W
+    MOVWF DIVIDEND_H
+    CALL DIV58
+
+    ; Convertir distancia (Quotient) a BCD para mostrar
+    CALL BIN2BCD
+
+    ; Mostrar en LCD (Posicionar cursor en línea 1, pos 7)
+    MOVLW 0x86
+    CALL LCD_CMD
+    
+    MOVF HUNDREDS, W
+    ADDLW '0'
+    CALL LCD_CHAR
+    MOVF TENS, W
+    ADDLW '0'
+    CALL LCD_CHAR
+    MOVF UNITS, W
+    ADDLW '0'
+    CALL LCD_CHAR
+    
+    MOVLW 'c'
+    CALL LCD_CHAR
+    MOVLW 'm'
+    CALL LCD_CHAR
+    MOVLW ' '
+    CALL LCD_CHAR
+
+    ; Retardo entre mediciones (aprox 60ms min requerido por el sensor)
+    CALL DELAY_100MS
+    GOTO MAIN_LOOP
+
+    ; --- Rutina de División por Restas Sucesivas (/58) ---
+DIV58:
+    CLRF QUOTIENT_L
+    CLRF QUOTIENT_H
+DIV_LOOP:
+    MOVLW d'58'
+    SUBWF DIVIDEND_L, F
+    BTFSS STATUS, C         ; Si hay Carry=0, hubo underflow en el LSB
+    DECF DIVIDEND_H, F
+    
+    ; Verificar si el MSB pasó a negativo (0xFF tras decrementar 0x00)
+    MOVLW 0xFF
+    XORWF DIVIDEND_H, W
+    BTFSC STATUS, Z
+    RETURN                  ; Fin de la división
+    
+    INCF QUOTIENT_L, F
+    BTFSC STATUS, Z
+    INCF QUOTIENT_H, F      ; Incrementar MSB del cociente si LSB desbordó
+    GOTO DIV_LOOP
+
+    ; --- Rutina Binario a BCD (Hasta 999) ---
+BIN2BCD:
+    CLRF HUNDREDS
+    CLRF TENS
+    CLRF UNITS
+    MOVF QUOTIENT_L, W
+    MOVWF DIST_L
+    MOVF QUOTIENT_H, W
+    MOVWF DIST_H
+CHK_100:
+    MOVLW d'100'
+    SUBWF DIST_L, F
+    BTFSS STATUS, C
+    DECF DIST_H, F
+    MOVLW 0xFF
+    XORWF DIST_H, W
+    BTFSC STATUS, Z
+    GOTO ADD_100
+    INCF HUNDREDS, F
+    GOTO CHK_100
+ADD_100:
+    MOVLW d'100'
+    ADDWF DIST_L, F
+    BTFSC STATUS, C
+    INCF DIST_H, F
+CHK_10:
+    MOVLW d'10'
+    SUBWF DIST_L, F
+    BTFSS STATUS, C
+    GOTO ADD_10
+    INCF TENS, F
+    GOTO CHK_10
+ADD_10:
+    MOVLW d'10'
+    ADDWF DIST_L, F
+    MOVF DIST_L, W
+    MOVWF UNITS
+    RETURN
+
+    ; --- Rutinas de Control del LCD (8 Bits) ---
+LCD_INIT:
+    CALL DELAY_100MS        ; Esperar estabilización de energía
+    MOVLW 0x38              ; 8 bits, 2 líneas, 5x8
+    CALL LCD_CMD
+    MOVLW 0x0C              ; Display ON, Cursor OFF
+    CALL LCD_CMD
+    MOVLW 0x06              ; Incremento automático
+    CALL LCD_CMD
+    MOVLW 0x01              ; Limpiar pantalla
+    CALL LCD_CMD
+    CALL DELAY_100MS
+    RETURN
+
+LCD_CMD:
+    BCF LCD_RS              ; RS=0 para comandos
+    BCF LCD_RW              ; RW=0 para escritura
+    MOVWF PORTD
+    BSF LCD_E
+    NOP
+    BCF LCD_E
+    CALL DELAY_1MS
+    RETURN
+
+LCD_CHAR:
+    BSF LCD_RS              ; RS=1 para datos
+    BCF LCD_RW
+    MOVWF PORTD
+    BSF LCD_E
+    NOP
+    BCF LCD_E
+    CALL DELAY_1MS
+    RETURN
+
+    ; --- Rutinas de Retardo ---
+DELAY_10US:
+    MOVLW d'5'
+    MOVWF DLY1
+DLY10_LOOP:
+    DECFSZ DLY1, F
+    GOTO DLY10_LOOP
+    RETURN
+
+DELAY_1MS:
+    MOVLW d'2'
+    MOVWF DLY2
+DLY1MS_L1:
+    MOVLW d'249'
+    MOVWF DLY1
+DLY1MS_L2:
+    DECFSZ DLY1, F
+    GOTO DLY1MS_L2
+    DECFSZ DLY2, F
+    GOTO DLY1MS_L1
+    RETURN
+
+DELAY_100MS:
+    MOVLW d'100'
+    MOVWF DLY3
+DLY100_LOOP:
+    CALL DELAY_1MS
+    DECFSZ DLY3, F
+    GOTO DLY100_LOOP
+    RETURN
+
+    END
+
